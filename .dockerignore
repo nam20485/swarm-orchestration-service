@@ -1,0 +1,27 @@
+# Keep the webhook-receiver build context minimal (compose builds from repo root).
+.git
+.venv
+.env
+.env.*
+**/__pycache__
+**/.pytest_cache
+
+# Non-image content
+.agents
+.zcode
+.github
+.vscode
+.idea
+docs
+scripts
+local_ai_instruction_modules
+coverage
+coverage.xml
+coverage.json
+coverage-html
+htmlcov
+.pytest_cache
+TestResults
+src/SwarmSandbox
+src/webhook_receiver/tests
+*.md

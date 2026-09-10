@@ -1,0 +1,25 @@
+# Reverse proxy in front of the webhook-receiver listener.
+#
+# Ported from orchestrator-service @2bd6d06 (deploy/caddy/Caddyfile). The
+# external contract is unchanged: this site is the public surface and it
+# exposes ONLY the GitHub webhook path and the health probe — everything else
+# answers 404 so the public surface enumerates nothing.
+#
+# WEBHOOK_SITE_ADDRESS (compose env):
+#   :80                — HTTP only (local dev / behind external TLS)
+#   hooks.example.com  — automatic HTTPS (Let's Encrypt) on :443
+
+{$WEBHOOK_SITE_ADDRESS} {
+	handle /webhooks/github {
+		reverse_proxy webhook-receiver:8080
+	}
+
+	handle /health {
+		reverse_proxy webhook-receiver:8080
+	}
+
+	# Catch-all: nothing else is public.
+	handle {
+		respond "Not Found" 404
+	}
+}

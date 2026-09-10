@@ -1,0 +1,47 @@
+# Phase 0.0 skeleton: webhook listener + Caddy proxy.
+#
+# Ported from orchestrator-service @2bd6d06 with the always-on
+# `orchestratorservice` (opencode serve) container deliberately dropped — the
+# ACP host (Phase 2) replaces it and must never exist as a container here
+# (docs/plans/orchestrator-service-simplification.md §3/§7).
+#
+# Setup: create a .env file next to this file (gitignored) with at least:
+#   OS_WEBHOOK_SECRET=<the GitHub App webhook secret>
+# Optional: WEBHOOK_SITE_ADDRESS (default :80), WEBHOOK_LOG_LEVEL (default info)
+services:
+  webhook-receiver:
+    build:
+      context: .
+      dockerfile: Dockerfile.webhook
+    image: swarm-orchestration-service/webhook:local
+    expose:
+      - "8080"
+    environment:
+      - OS_WEBHOOK_SECRET=${OS_WEBHOOK_SECRET:?OS_WEBHOOK_SECRET is required}
+      - WEBHOOK_HOST=0.0.0.0
+      - WEBHOOK_PORT=8080
+      - WEBHOOK_LOG_LEVEL=${WEBHOOK_LOG_LEVEL:-info}
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+  webhook-proxy:
+    # Digest pinned; same caddy:2.10.0-alpine pin as the reference repo.
+    image: caddy:2.10.0-alpine@sha256:ae4458638da8e1a91aafffb231c5f8778e964bca650c8a8cb23a7e8ac557aa3c
+    cap_add:
+      - CAP_NET_BIND_SERVICE
+    ports:
+      - "80:80"
+    environment:
+      - WEBHOOK_SITE_ADDRESS=${WEBHOOK_SITE_ADDRESS:-:80}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - webhook-receiver
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:
