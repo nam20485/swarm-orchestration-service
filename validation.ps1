@@ -349,6 +349,9 @@ function Step-Python {
     Write-Host "Running webhook-receiver pytest suite..." -ForegroundColor Gray
     $coverageJson = Join-Path $repoRoot 'coverage.json'
     $covModules = @(
+        'webhook_receiver.acp_host',
+        'webhook_receiver.acp_policy',
+        'webhook_receiver.acp_smoke',
         'webhook_receiver.app',
         'webhook_receiver.config',
         'webhook_receiver.event_store',
