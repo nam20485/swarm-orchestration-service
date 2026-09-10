@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager, suppress
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
@@ -11,6 +14,7 @@ from webhook_receiver.config import Settings
 from webhook_receiver.event_store import EventStore
 from webhook_receiver.filters import should_dispatch
 from webhook_receiver.github import verify_signature
+from webhook_receiver.prompt_queue import PromptInfo, PromptQueue
 
 logger = logging.getLogger(__name__)
 
@@ -18,18 +22,36 @@ logger = logging.getLogger(__name__)
 def create_app(
     settings: Settings | None = None,
     event_store: EventStore | None = None,
+    prompt_queue: PromptQueue | None = None,
 ) -> FastAPI:
     """Build the webhook listener app (port of orchestrator-service @2bd6d06).
 
-    Phase 0.0 scope: HMAC verification, the dispatch gate, and EventStore
-    logging. Dispatch itself is stubbed — Phase 1 replaces the old
-    BackgroundTasks+Popen path with a PromptInfo enqueue (see TODO below).
+    Phase 1 scope: HMAC verification, the dispatch gate, EventStore logging,
+    and the queue seam — accepted deliveries are enqueued as frozen
+    PromptInfo envelopes (deduped by delivery id) and drained by a consumer
+    task started in the app lifespan. The consumer itself is the Phase 2
+    seam (ACP host); it currently only marks envelopes consumed.
     """
     cfg = settings or Settings.from_env()
     store = event_store or EventStore()
+    queue = prompt_queue or PromptQueue(store)
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        consumer = asyncio.create_task(
+            queue.consume(), name="prompt-queue-consumer"
+        )
+        try:
+            yield
+        finally:
+            consumer.cancel()
+            with suppress(asyncio.CancelledError):
+                await consumer
+
     app = FastAPI(
         title="Swarm Orchestration GitHub Webhook Receiver",
         version="0.1.0",
+        lifespan=lifespan,
     )
 
     @app.get("/health")
@@ -143,18 +165,47 @@ def create_app(
             label=(payload.get("label") or {}).get("name", ""),
         )
 
-        # TODO(Phase 1): construct a PromptInfo from (event, payload) and
-        # enqueue it on the async PromptInfo queue; a consumer hands it to the
-        # ACP host (Phase 2). The old BackgroundTasks + subprocess.Popen
-        # dispatch to opencode is deliberately NOT ported — see
-        # docs/plans/orchestrator-service-simplification.md §7 Phase 1/Phase 2.
-        logger.info(
-            "Accepted delivery_id=%s event=%s action=%s (dispatch stubbed: "
-            "PromptInfo queue lands in Phase 1)",
-            delivery_id,
-            event,
-            payload.get("action"),
+        repo_full = payload.get("repository", {}).get("full_name", "?")
+        action = payload.get("action", "")
+        label_name = (payload.get("label") or {}).get("name", "")
+
+        info = PromptInfo(
+            delivery_id=delivery_id,
+            repo=repo_full,
+            event=event,
+            action=action,
+            label=label_name,
+            payload=payload,
         )
+        if queue.enqueue(info):
+            logger.info(
+                "Accepted delivery_id=%s event=%s action=%s (queued PromptInfo id=%s)",
+                delivery_id,
+                event,
+                action,
+                info.id,
+            )
+            store.emit(
+                "prompt_queued",
+                id=info.id,
+                delivery_id=delivery_id,
+                repo=repo_full,
+                event=event,
+                action=action,
+                label=label_name,
+            )
+        else:
+            logger.info(
+                "Duplicate delivery_id=%s event=%s dropped by queue dedup",
+                delivery_id,
+                event,
+            )
+            store.emit(
+                "webhook_duplicate",
+                delivery_id=delivery_id,
+                event=event,
+                action=action,
+            )
         return JSONResponse(
             {
                 "status": "accepted",
