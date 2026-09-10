@@ -12,6 +12,19 @@ When asked to commit the current set of changes in the working copy, always:
 2. Break the changes into conceptual groups.
 3. Commit each group with a meaningful message.
 
+## Merge gate (user directive 2026-09-10)
+
+Mechanical brakes on consequential git steps — never batch them into compound commands:
+
+- **Merge only on an explicitly-read green conclusion.** The head branch's CI `conclusion` must be
+  read and equal `success` before merging; the merge is issued as its own standalone command.
+  Never chain a merge after `gh run watch` or a status query — a query that prints "failure" still
+  exits 0.
+- **Delete a merged branch only after post-merge CI on the base branch is green** — the branch
+  pointer is the natural revert target while the merge is still unproven.
+- **Destructive operations** (remote branch deletion, force-push, history rewrite, stash drop)
+  require stating intent and consequence immediately before execution, as a standalone command.
+
 ## Monitor Workflows
 
 - After pushing, monitor the workflows to ensure they are running as expected.
