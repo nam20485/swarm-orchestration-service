@@ -1,0 +1,4 @@
+# Runtime dependencies for the webhook-receiver listener (Phase 0.0).
+# Pinned exactly; bump deliberately.
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
