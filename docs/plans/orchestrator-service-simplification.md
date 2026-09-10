@@ -209,10 +209,17 @@ identically over ACP) can be set so requests never fire. Prior art to copy:
 modes `--approve-all` / `--approve-reads` (default) / `--deny-all` plus per-tool JSON policy
 (`autoApprove`/`autoDeny`/`escalate`/`defaultAction`).
 
-**Residual unknowns (spike must confirm):** exact opencode floor version for `acp` (docs archived
-2025-10-29; releases mention ACP back to v0.15.10); whether TUI `--auto` applies to `acp` mode
-(use the config route); the purpose of `acp --port/--hostname/--mdns/--cors` flags (unexplained in
-docs — likely a companion endpoint).
+**Resolved by Phase 0.1 spike (2026-09-10, `spikes/acp/`):** `acp` floor is **v0.15.10**
+(2025-10-20; release notes "Added ACP (Agent Client Protocol) support"; verified running on local
+1.18.30); TUI `--auto` does **not** exist for `acp` mode — over ACP, permission behavior is
+config-only (`permission` in `opencode.json`) plus the host's `session/request_permission`
+responses; `acp --port/--hostname/--mdns/--cors` expose the agent over HTTP as a **companion web
+endpoint** (verified: `--port N` binds an HTTP listener, `200 OK` HTML; default port 0 = stdio
+only; `--mdns` advertises via mDNS and defaults hostname to 0.0.0.0; `--cors` allows extra
+browser origins). Round-trip and both deny paths proven headless: happy path `end_turn` in 6.2 s;
+auto-`reject_once` on `session/request_permission` → tool `failed` → `end_turn` 94 ms later, no
+hang; `permission.bash: "deny"` removes the tool pre-prompt (zero requests fired). Evidence and
+re-run steps in `spikes/acp/README.md`.
 
 ## 7. Implementation plan (phased)
 
