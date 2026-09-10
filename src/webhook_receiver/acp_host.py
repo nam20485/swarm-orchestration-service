@@ -59,6 +59,7 @@ from acp.schema import (
 
 from webhook_receiver.acp_policy import PermissionDecision, decide, respond
 from webhook_receiver.prompt_queue import PromptInfo
+from webhook_receiver.sandbox_bridge import SandboxBridge, SandboxWorkspace
 
 if TYPE_CHECKING:
     from webhook_receiver.config import Settings
@@ -191,16 +192,48 @@ class HostClient:
 
 
 class AcpHost:
-    """Runs one cold ACP session per :class:`PromptInfo` envelope."""
+    """Runs one cold ACP session per :class:`PromptInfo` envelope.
 
-    def __init__(self, settings: Settings, store: EventStore) -> None:
+    Phase 4: when the settings enable it (``SANDBOX_ENABLED``), the session
+    cwd is a SwarmSandbox-materialized workspace (bridge ``prepare`` /
+    ``release`` around the session, Decision 5); otherwise the Phase 2 plain
+    scratch dir is kept. A bridge may be injected (tests); without injection
+    one is built from settings when enabled.
+    """
+
+    def __init__(
+        self,
+        settings: Settings,
+        store: EventStore,
+        bridge: SandboxBridge | None = None,
+    ) -> None:
         self._settings = settings
         self._store = store
+        self._bridge = (
+            bridge
+            if bridge is not None
+            else (SandboxBridge(settings, store) if settings.sandbox_enabled else None)
+        )
 
     async def run(self, info: PromptInfo) -> AcpRunResult:
         """Drive one prompt end-to-end; raises :class:`AcpHostError` on failure."""
         bin_path = resolve_opencode_bin(self._settings)
-        workspace = self._prepare_workspace(info)
+        sandbox: SandboxWorkspace | None = None
+        if self._bridge is not None:
+            try:
+                sandbox = await self._bridge.prepare(info)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                # Fail closed (no scratch-dir fallback): an enabled-but-broken
+                # sandbox surfaces as a failed run (prompt_consumed {ok:false}).
+                raise AcpHostError(
+                    f"sandbox workspace failed for delivery {info.delivery_id}: {exc}"
+                ) from exc
+            workspace = sandbox.path
+        else:
+            workspace = self._prepare_workspace(info)
+        self._write_deny_config(workspace)
         client = HostClient(self._settings, self._store, run_id=info.id)
         step = self._settings.acp_step_timeout
         prompt_timeout = self._settings.acp_prompt_timeout
@@ -289,6 +322,17 @@ class AcpHost:
                     logger.warning(
                         "opencode process not reaped cleanly run_id=%s", info.id
                     )
+            if sandbox is not None and self._bridge is not None:
+                # Shielded so a shutdown cancel cannot strand the release
+                # mid-await; the reaper TTL is the crash backstop regardless.
+                try:
+                    await asyncio.shield(self._bridge.release(sandbox))
+                except Exception:
+                    logger.warning(
+                        "sandbox release failed run_id=%s sandbox_id=%s",
+                        info.id,
+                        sandbox.sandbox_id,
+                    )
 
         stop_reason = getattr(response, "stop_reason", None)
         self._store.emit(
@@ -313,6 +357,10 @@ class AcpHost:
         )
         workspace = root / info.id
         workspace.mkdir(parents=True, exist_ok=True)
+        return workspace
+
+    def _write_deny_config(self, workspace: Path) -> None:
+        """Belt-and-braces deny-list, applied to every kind of workspace."""
         if self._settings.acp_denied_tools:
             config = {
                 "$schema": "https://opencode.ai/config.json",
@@ -321,4 +369,3 @@ class AcpHost:
             (workspace / "opencode.json").write_text(
                 json.dumps(config, indent=2), encoding="utf-8"
             )
-        return workspace
