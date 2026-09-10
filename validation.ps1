@@ -353,7 +353,8 @@ function Step-Python {
         'webhook_receiver.config',
         'webhook_receiver.event_store',
         'webhook_receiver.filters',
-        'webhook_receiver.github'
+        'webhook_receiver.github',
+        'webhook_receiver.prompt_queue'
     )
     $pytestArgs = @('-m', 'pytest', (Join-Path $serviceDir 'tests'), '-q')
     foreach ($mod in $covModules) { $pytestArgs += "--cov=$mod" }
