@@ -11,6 +11,7 @@ from webhook_receiver.app import create_app
 from webhook_receiver.config import Settings
 from webhook_receiver.event_store import EventStore
 from webhook_receiver.github import compute_signature
+from webhook_receiver.prompt_queue import PromptQueue
 
 SECRET = "FAKE-WEBHOOK-SECRET-FOR-TESTING"
 
@@ -128,3 +129,55 @@ class TestVerifyGateStorePath:
         tiny = TestClient(create_app(make_settings(max_body_bytes=10), store))
         resp = post(tiny, b"x" * 100, signature="sha256=00")
         assert resp.status_code == 413
+
+
+class RecordingQueue(PromptQueue):
+    """Queue that remembers enqueued envelopes for assertions."""
+
+    def __init__(self, store: EventStore) -> None:
+        super().__init__(store)
+        self.enqueued: list = []
+
+    def enqueue(self, info) -> bool:
+        self.enqueued.append(info)
+        return super().enqueue(info)
+
+
+class TestEnqueuedPrompt:
+    """Phase 3: the accepted path fills the envelope's orchestration prompt."""
+
+    def _client_for(self, store: EventStore) -> tuple[TestClient, RecordingQueue]:
+        queue = RecordingQueue(store)
+        return TestClient(create_app(make_settings(), store, prompt_queue=queue)), queue
+
+    def test_accepted_delivery_enqueues_orchestration_prompt(
+        self, store: EventStore
+    ) -> None:
+        client, queue = self._client_for(store)
+        resp = post(client, VALID_PAYLOAD, signature=signed(json.dumps(VALID_PAYLOAD).encode()))
+        assert resp.status_code == 202
+        info = queue.enqueued[0]
+        assert info.prompt is not None
+        assert "owner/repo" in info.prompt
+        assert "orchestration:plan" in info.prompt
+        assert "live tracking state" in info.prompt
+
+    def test_direct_body_enqueues_body_verbatim(self, store: EventStore, monkeypatch) -> None:
+        monkeypatch.setenv("DIRECT_BODY_ALLOWED_SENDERS", "nam20485")
+        payload = dict(VALID_PAYLOAD, label={"name": "gh-issue-tracking:direct-body"})
+        payload["issue"] = dict(
+            payload["issue"],
+            labels=[{"name": "gh-issue-tracking:direct-body"}],
+            body="do the thing",
+        )
+        client, queue = self._client_for(store)
+        resp = post(client, payload, signature=signed(json.dumps(payload).encode()))
+        assert resp.status_code == 202
+        assert queue.enqueued[0].prompt == "do the thing"
+
+    def test_filtered_delivery_enqueues_nothing(self, store: EventStore) -> None:
+        client, queue = self._client_for(store)
+        payload = dict(VALID_PAYLOAD, label={"name": "bug"})
+        resp = post(client, payload, signature=signed(json.dumps(payload).encode()))
+        assert resp.status_code == 202
+        assert queue.enqueued == []

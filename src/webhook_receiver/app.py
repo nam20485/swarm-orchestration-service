@@ -15,6 +15,7 @@ from webhook_receiver.config import Settings
 from webhook_receiver.event_store import EventStore
 from webhook_receiver.filters import should_dispatch
 from webhook_receiver.github import verify_signature
+from webhook_receiver.prompt_builder import build_orchestration_prompt
 from webhook_receiver.prompt_queue import PromptInfo, PromptQueue
 
 logger = logging.getLogger(__name__)
@@ -182,6 +183,10 @@ def create_app(
             label=label_name,
             payload=payload,
         )
+        # Phase 3: fill the envelope's orchestration prompt at enqueue time
+        # (docs/plans/promptinfo-design.md §2) — the ACP host's prompt seam
+        # sends a filled envelope prompt verbatim instead of deriving one.
+        info = info.model_copy(update={"prompt": build_orchestration_prompt(info)})
         if queue.enqueue(info):
             logger.info(
                 "Accepted delivery_id=%s event=%s action=%s (queued PromptInfo id=%s)",
