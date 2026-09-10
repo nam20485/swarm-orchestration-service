@@ -357,6 +357,7 @@ function Step-Python {
         'webhook_receiver.event_store',
         'webhook_receiver.filters',
         'webhook_receiver.github',
+        'webhook_receiver.prompt_builder',
         'webhook_receiver.prompt_queue'
     )
     $pytestArgs = @('-m', 'pytest', (Join-Path $serviceDir 'tests'), '-q')

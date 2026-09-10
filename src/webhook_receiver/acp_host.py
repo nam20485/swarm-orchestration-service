@@ -32,10 +32,11 @@ Other ``session/update`` kinds (plan deltas, mode changes, thought chunks,
 available commands) are consumed and ignored — extend the mapping here if
 the dashboard needs them.
 
-**Prompt seam (Phase 3 note):** the envelope's own ``prompt`` wins when
-present (Phase 3 fills it); until then :func:`build_prompt` derives a
-minimal pipeline-check instruction from the envelope fields. Phase 3
-replaces that derivation with the open-ended orchestration prompt.
+**Prompt seam (Phase 3):** the envelope's own ``prompt`` wins when present —
+the listener fills it with the open-ended orchestration prompt at enqueue
+time (``prompt_builder.build_orchestration_prompt``). The derived
+pipeline-check instruction below remains only as the fallback for
+envelopes built outside the listener (smoke overrides, direct host use).
 """
 
 from __future__ import annotations
