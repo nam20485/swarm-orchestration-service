@@ -1,14 +1,18 @@
-"""Manual real-opencode smoke for the Phase 2 ACP host (NOT run by validation/CI).
+"""Manual real-opencode smoke for the ACP host (NOT run by validation/CI).
 
 Drives one envelope through the real ``AcpHost`` → ``opencode acp`` path
 against a scratch workspace and prints the EventStore stream plus the final
-outcome. Exit code 0 on ``end_turn``, 1 otherwise.
+outcome. Since Phase 3 the envelope carries the BUILT orchestration prompt
+(``prompt_builder.build_orchestration_prompt``) by default, so the smoke
+shows the real session receiving the open-ended orchestration direction.
+Exit code 0 on ``end_turn``, 1 otherwise.
 
 Usage (from the repo root):
 
     OS_WEBHOOK_SECRET=unused-by-smoke .venv/bin/python -m webhook_receiver.acp_smoke \\
         [--repo owner/repo] [--event issues] [--action labeled]
-        [--label orchestration:plan] [--delivery-id smoke-1] [--prompt TEXT]
+        [--label orchestration:plan-approved] [--delivery-id smoke-1]
+        [--prompt TEXT]
 
 ACP host knobs come from the environment like the service (``ACP_ENABLED`` is
 ignored — the smoke always runs the host; set ``ACP_OPENCODE_BIN``,
@@ -29,6 +33,7 @@ from typing import Any
 from webhook_receiver.acp_host import AcpHost, AcpHostError
 from webhook_receiver.config import Settings
 from webhook_receiver.event_store import EventStore
+from webhook_receiver.prompt_builder import build_orchestration_prompt
 from webhook_receiver.prompt_queue import PromptInfo
 
 
@@ -40,12 +45,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--repo", default="owner/repo")
     parser.add_argument("--event", default="issues")
     parser.add_argument("--action", default="labeled")
-    parser.add_argument("--label", default="orchestration:plan")
+    parser.add_argument("--label", default="orchestration:plan-approved")
     parser.add_argument("--delivery-id", default="smoke-1")
     parser.add_argument(
         "--prompt",
         default=None,
-        help="override the derived Phase 2 prompt (simulates the Phase 3 seam)",
+        help="override the built orchestration prompt (prompt-shape experiments)",
     )
     return parser.parse_args(argv)
 
@@ -61,14 +66,18 @@ def build_settings() -> Settings:
 
 
 def build_envelope(args: argparse.Namespace) -> PromptInfo:
-    return PromptInfo(
+    info = PromptInfo(
         delivery_id=args.delivery_id,
         repo=args.repo,
         event=args.event,
         action=args.action,
         label=args.label,
         payload={"smoke": True},
-        prompt=args.prompt,
+    )
+    # Phase 3 default: the envelope carries the built orchestration prompt;
+    # --prompt overrides it (mirrors what the listener now enqueues).
+    return info.model_copy(
+        update={"prompt": args.prompt or build_orchestration_prompt(info)}
     )
 
 
