@@ -42,17 +42,22 @@ VALID_PAYLOAD = {
 
 
 def make_settings(tmp_path: Path, **acp: object) -> Settings:
-    return Settings(
-        host="testserver",
-        port=80,
-        github_webhook_secret="FAKE-WEBHOOK-SECRET-FOR-TESTING",
-        max_body_bytes=25 * 1024 * 1024,
-        log_level="info",
-        acp_workspace_root=str(tmp_path / "ws"),
-        acp_step_timeout=1.0,
-        acp_prompt_timeout=1.0,
-        **acp,
-    )
+    # acp_opencode_bin defaults to a stub so run-path tests never depend on a
+    # real opencode binary (CI has none — resolve_opencode_bin returns the
+    # explicit setting without checking existence; spawn is monkeypatched).
+    params: dict[str, object] = {
+        "host": "testserver",
+        "port": 80,
+        "github_webhook_secret": "FAKE-WEBHOOK-SECRET-FOR-TESTING",
+        "max_body_bytes": 25 * 1024 * 1024,
+        "log_level": "info",
+        "acp_workspace_root": str(tmp_path / "ws"),
+        "acp_step_timeout": 1.0,
+        "acp_prompt_timeout": 1.0,
+        "acp_opencode_bin": "opencode-test-stub",
+    }
+    params.update(acp)
+    return Settings(**params)  # type: ignore[arg-type]
 
 
 def make_info(**overrides: object) -> PromptInfo:
@@ -394,12 +399,12 @@ class TestResolveOpencodeBin:
         assert resolve_opencode_bin(cfg) == "/opt/oc"
 
     def test_path_lookup_second(self, tmp_path: Path, monkeypatch) -> None:
-        cfg = make_settings(tmp_path)
+        cfg = make_settings(tmp_path, acp_opencode_bin="")
         monkeypatch.setattr(acp_host_module.shutil, "which", lambda name: "/usr/bin/oc")
         assert resolve_opencode_bin(cfg) == "/usr/bin/oc"
 
     def test_home_default_third(self, tmp_path: Path, monkeypatch) -> None:
-        cfg = make_settings(tmp_path)
+        cfg = make_settings(tmp_path, acp_opencode_bin="")
         monkeypatch.setattr(acp_host_module.shutil, "which", lambda name: None)
         monkeypatch.setenv("HOME", str(tmp_path))
         (tmp_path / ".opencode" / "bin").mkdir(parents=True)
@@ -407,7 +412,7 @@ class TestResolveOpencodeBin:
         assert resolve_opencode_bin(cfg) == str(tmp_path / ".opencode" / "bin" / "opencode")
 
     def test_missing_binary_raises(self, tmp_path: Path, monkeypatch) -> None:
-        cfg = make_settings(tmp_path)
+        cfg = make_settings(tmp_path, acp_opencode_bin="")
         monkeypatch.setattr(acp_host_module.shutil, "which", lambda name: None)
         monkeypatch.setenv("HOME", str(tmp_path / "nonexistent-home"))
         with pytest.raises(AcpHostError, match="opencode binary not found"):
