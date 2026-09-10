@@ -142,29 +142,29 @@ swarm assets ship with it.
 7. **Dashboard/progress: ACP protocol events only** (`session/update` → the SSE `EventStore` as
    new event types); the opencode-stderr glyph parser is deleted.
 8. **Repo topology: new repo `nam20485/swarm-orchestration-service`, cloned from THIS repo
-   (swarm-context), for both sides** — no cross-contamination with the old `orchestrator-service`
+   (swarm-context), for both sides, linked to swarm-context via a fork-style upstream remote**
+   — no cross-contamination with the old `orchestrator-service`
    (which remains untouched as the reference implementation to port the listener/webhook code
    from). The clone carries the swarm harness (`swarm`/`swarm-plan` skills, `.zcode/agents`,
    rules), `gh-issue-tracking-init`, and the SwarmSandbox service source (Decision 5) — the
    "Reuse from this repo" note in §3.3 becomes load-bearing here.
 
-   **Linking analysis (owner question: how do the new orchestration-service repo and
-   swarm-context stay linked? no submodules):**
+   **Linking decision: fork-style upstream remote.** swarm-context
+   stays the template/harness source of truth; the orchestration repo is cloned once from it,
+   adds `upstream` → swarm-context, and merges `upstream/development` on demand (each sync a
+   PR, so contamination is one-directional and reviewed). Alternatives considered and rejected:
 
    | Mechanism | Pros | Cons |
    |---|---|---|
-   | **Fork-style upstream remote** (clone once; `git remote add upstream <swarm-context>`; periodic `git fetch upstream && git merge upstream/development` as a reviewed PR) | plain git, no submodules; shared ancestry makes merges natural; syncs are explicit, reviewable PRs; orchest repo owns its releases; no tooling | occasional merge conflicts where the orchest repo customizes shared files; history carries the template's past (small repo — negligible) |
+   | **Fork-style upstream remote — CHOSEN** (clone once; `git remote add upstream <swarm-context>`; periodic `git fetch upstream && git merge upstream/development` as a reviewed PR) | plain git, no submodules; shared ancestry makes merges natural; syncs are explicit, reviewable PRs; orchest repo owns its releases; no tooling | occasional merge conflicts where the orchest repo customizes shared files; history carries the template's past (small repo — negligible) |
    | Template re-clone / cherry-pick | zero coupling | effectively manual copy-paste; no diffable update path; drift is invisible |
    | Git submodule | precise version pinning | detached-pointer confusion, partial checkouts, CI complexity — owner rejects |
    | Extracted shared package + sync script | clean layering | big refactor for a 2-consumer base; still needs the sync discipline it claims to remove |
 
-   **Recommendation: fork-style upstream remote.** swarm-context stays the template/harness
-   source of truth; the orchestration repo merges `upstream/development` on demand (each sync a
-   PR, so contamination is one-directional and reviewed). Longer-term, if the swarm harness
-   stabilizes, upstream the shared assets into `intel-agency/agent-context` (the parent
-   template) and point both repos' `upstream` there — same mechanism, one level higher. Cloning
-   agent-context *instead* is not recommended today: it lacks the swarm assets entirely, so the
-   orchest repo would have to re-import them from here anyway.
+   Longer-term, if the swarm harness stabilizes, upstream the shared assets into
+   `intel-agency/agent-context` (the parent template) and point both repos' `upstream` there —
+   same mechanism, one level higher. Cloning agent-context *instead* was rejected: it lacks the
+   swarm assets entirely, so the orchest repo would have to re-import them from here anyway.
 9. **Feature path (b): new features become new Epic/Story/Task issues in the EXISTING repo's
    existing tracking.** The original app-plan issue was the initial implementation's tracking;
    additional features get their own issues under the existing Projects board and label

@@ -57,7 +57,7 @@ Expected result: 101 tests passing across three test files (`GhIssueTracking`,
 
 Markdown linting uses `markdownlint-cli2` with configuration in [`.markdownlint.json`](.markdownlint.json).
 Scope linting to changed files to avoid known pre-existing violations in
-`docs/plans/new templates/` and `local_ai_instruction_modules/`:
+`local_ai_instruction_modules/`:
 
 ```sh
 markdownlint-cli2 README.md .agents/memory.md
