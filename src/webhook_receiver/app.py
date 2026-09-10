@@ -10,6 +10,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from webhook_receiver.acp_host import AcpHost
 from webhook_receiver.config import Settings
 from webhook_receiver.event_store import EventStore
 from webhook_receiver.filters import should_dispatch
@@ -26,15 +27,19 @@ def create_app(
 ) -> FastAPI:
     """Build the webhook listener app (port of orchestrator-service @2bd6d06).
 
-    Phase 1 scope: HMAC verification, the dispatch gate, EventStore logging,
-    and the queue seam — accepted deliveries are enqueued as frozen
-    PromptInfo envelopes (deduped by delivery id) and drained by a consumer
-    task started in the app lifespan. The consumer itself is the Phase 2
-    seam (ACP host); it currently only marks envelopes consumed.
+    Accepted deliveries are enqueued as frozen PromptInfo envelopes (deduped
+    by delivery id) and drained by a consumer task started in the app
+    lifespan. Phase 2: when the app owns the queue and ``acp_enabled`` is
+    set, the consumer drives the ACP host — one cold opencode session per
+    envelope. An injected ``prompt_queue`` keeps its own host (tests and
+    host variants wire their own); with ACP disabled the consumer falls back
+    to the Phase 1 mark-consumed placeholder.
     """
     cfg = settings or Settings.from_env()
     store = event_store or EventStore()
-    queue = prompt_queue or PromptQueue(store)
+    queue = prompt_queue or PromptQueue(
+        store, host=AcpHost(cfg, store) if cfg.acp_enabled else None
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:

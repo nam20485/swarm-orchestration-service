@@ -1,4 +1,4 @@
-"""Tests for the PromptInfo envelope, the PromptQueue, and the Phase 1 wiring."""
+"""Tests for the PromptInfo envelope, the PromptQueue, and the Phase 1/2 wiring."""
 
 from __future__ import annotations
 
@@ -11,6 +11,8 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
+import webhook_receiver.app as app_module
+from webhook_receiver.acp_host import AcpHostError, AcpRunResult
 from webhook_receiver.app import create_app
 from webhook_receiver.config import Settings
 from webhook_receiver.event_store import EventStore
@@ -28,14 +30,19 @@ VALID_PAYLOAD = {
 }
 
 
-def make_settings() -> Settings:
-    return Settings(
-        host="testserver",
-        port=80,
-        github_webhook_secret=SECRET,
-        max_body_bytes=25 * 1024 * 1024,
-        log_level="info",
-    )
+def make_settings(**overrides: object) -> Settings:
+    # acp_enabled=False: Phase 1 wiring tests run the placeholder consumer;
+    # the ACP-driven consumer path is covered in TestPhase2ConsumerWiring.
+    fields: dict[str, object] = {
+        "host": "testserver",
+        "port": 80,
+        "github_webhook_secret": SECRET,
+        "max_body_bytes": 25 * 1024 * 1024,
+        "log_level": "info",
+        "acp_enabled": False,
+    }
+    fields.update(overrides)
+    return Settings(**fields)  # type: ignore[arg-type]
 
 
 def make_info(delivery_id: str = "d-1", **overrides: object) -> PromptInfo:
@@ -261,3 +268,137 @@ class TestWebhookQueueWiring:
         assert resp.status_code == 200
         assert queue._queue.qsize() == 0
         assert events_of_type(store, "prompt_queued") == []
+
+
+class FakeHost:
+    """Stand-in for the ACP host: canned outcome, records envelopes."""
+
+    def __init__(
+        self,
+        result: AcpRunResult | None = None,
+        exc: Exception | None = None,
+    ) -> None:
+        self.runs: list[PromptInfo] = []
+        self._result = result
+        self._exc = exc
+
+    async def run(self, info: PromptInfo) -> AcpRunResult:
+        self.runs.append(info)
+        if self._exc is not None:
+            raise self._exc
+        return self._result  # type: ignore[return-value]
+
+
+class TestPhase2ConsumerWiring:
+    """The consumer drives the ACP host when one is attached."""
+
+    def test_host_runs_per_envelope_and_result_merged(self) -> None:
+        store = EventStore()
+        host = FakeHost(
+            AcpRunResult(session_id="sess-1", stop_reason="end_turn", workspace="/tmp/w")
+        )
+        q = PromptQueue(store, host=host)
+        q.enqueue(make_info("d-1"))
+        q.enqueue(make_info("d-2"))
+
+        asyncio.run(drain(q))
+
+        assert len(host.runs) == 2
+        assert host.runs[0].delivery_id == "d-1"
+        consumed = events_of_type(store, "prompt_consumed")
+        assert all(e["data"]["ok"] is True for e in consumed)
+        assert consumed[0]["data"]["session_id"] == "sess-1"
+        assert consumed[0]["data"]["stop_reason"] == "end_turn"
+
+    def test_host_exception_records_ok_false_and_keeps_draining(self) -> None:
+        store = EventStore()
+        host = FakeHost(exc=AcpHostError("acp session failed: opencode missing"))
+        q = PromptQueue(store, host=host)
+        q.enqueue(make_info("d-1"))
+        q.enqueue(make_info("d-2"))
+
+        asyncio.run(drain(q))
+
+        consumed = events_of_type(store, "prompt_consumed")
+        assert len(consumed) == 2
+        assert all(e["data"]["ok"] is False for e in consumed)
+        assert "opencode missing" in consumed[0]["data"]["error"]
+        assert q._queue.qsize() == 0
+
+    def test_queue_without_host_keeps_placeholder(self) -> None:
+        store = EventStore()
+        q = PromptQueue(store)
+        q.enqueue(make_info("d-1"))
+
+        asyncio.run(drain(q))
+
+        consumed = events_of_type(store, "prompt_consumed")
+        assert consumed[0]["data"]["ok"] is True
+        assert "session_id" not in consumed[0]["data"]
+        assert "stop_reason" not in consumed[0]["data"]
+
+    def test_app_without_host_attaches_nothing_when_acp_disabled(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def explode(*args: object, **kwargs: object) -> None:
+            raise AssertionError("AcpHost must not be constructed when disabled")
+
+        monkeypatch.setattr(app_module, "AcpHost", explode)
+        store = EventStore()
+        with TestClient(create_app(make_settings(acp_enabled=False), store)) as client:
+            resp = post(client, VALID_PAYLOAD)
+            assert resp.status_code == 202
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline and not events_of_type(
+                store, "prompt_consumed"
+            ):
+                time.sleep(0.01)
+        consumed = events_of_type(store, "prompt_consumed")
+        assert consumed[0]["data"]["ok"] is True
+        assert "session_id" not in consumed[0]["data"]
+
+    def test_app_with_acp_enabled_attaches_host(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        store = EventStore()
+        host = FakeHost(
+            AcpRunResult(session_id="sess-app", stop_reason="end_turn", workspace="/tmp/w")
+        )
+        constructed: list = []
+
+        def fake_host_factory(cfg: Settings, st: EventStore) -> FakeHost:
+            constructed.append((cfg, st))
+            return host
+
+        monkeypatch.setattr(app_module, "AcpHost", fake_host_factory)
+
+        with TestClient(create_app(make_settings(acp_enabled=True), store)) as client:
+            resp = post(client, VALID_PAYLOAD)
+            assert resp.status_code == 202
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline and len(host.runs) < 1:
+                time.sleep(0.01)
+
+        assert len(constructed) == 1
+        assert constructed[0][0].acp_enabled is True
+        assert constructed[0][1] is store
+        assert len(host.runs) == 1
+        assert host.runs[0].delivery_id == "d-123"
+        consumed = events_of_type(store, "prompt_consumed")
+        assert consumed[0]["data"]["session_id"] == "sess-app"
+
+    def test_injected_queue_keeps_its_own_host(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A queue handed to create_app is wired by its creator; the app must
+        # not attach (or replace) a host on it.
+        def explode(*args: object, **kwargs: object) -> None:
+            raise AssertionError("AcpHost must not be constructed for injected queues")
+
+        monkeypatch.setattr(app_module, "AcpHost", explode)
+        store = EventStore()
+        queue = PromptQueue(store)
+        client = TestClient(create_app(make_settings(acp_enabled=True), store, prompt_queue=queue))
+
+        resp = post(client, VALID_PAYLOAD)
+
+        assert resp.status_code == 202
+        assert queue._queue.qsize() == 1
