@@ -20,6 +20,10 @@
     Skip the .NET branch (SwarmSandbox solution build/test/coverage) for
     environments without the .NET SDK. The Pester flow is unaffected.
 
+.PARAMETER SkipPython
+    Skip the Python branch (webhook-receiver pytest/coverage) for
+    environments without python3. The Pester and .NET flows are unaffected.
+
 .EXAMPLE
     ./validation.ps1
     ./validation.ps1 -Step test
@@ -28,14 +32,16 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('build', 'scan', 'test', 'dotnet', 'all')]
+    [ValidateSet('build', 'scan', 'test', 'dotnet', 'python', 'all')]
     [string]$Step = 'all',
 
     [int]$CoverageThreshold = 85,
 
     [switch]$SkipHtml,
 
-    [switch]$SkipDotnet
+    [switch]$SkipDotnet,
+
+    [switch]$SkipPython
 )
 
 $ErrorActionPreference = 'Stop'
@@ -305,6 +311,69 @@ function Step-Dotnet {
     Write-Host "Dotnet passed." -ForegroundColor Green
 }
 
+function Step-Python {
+    if ($SkipPython) {
+        Write-Host "`n=== PYTHON (skipped by -SkipPython) ===" -ForegroundColor Yellow
+        return
+    }
+
+    $serviceDir = Join-Path $repoRoot 'src/webhook_receiver'
+    if (-not (Test-Path $serviceDir)) {
+        Write-Host "`n=== PYTHON (skipped: src/webhook_receiver not found) ===" -ForegroundColor Yellow
+        return
+    }
+
+    $pythonCmd = $null
+    foreach ($candidate in @('python3', 'python')) {
+        if (Test-CommandAvailable $candidate) { $pythonCmd = $candidate; break }
+    }
+    if (-not $pythonCmd) {
+        Write-Host "`n=== PYTHON (skipped: python3 not found; install Python 3.12+ to run the webhook-receiver suite) ===" -ForegroundColor Yellow
+        return
+    }
+
+    Write-Host "`n=== PYTHON (webhook-receiver pytest/coverage) ===" -ForegroundColor Cyan
+
+    $venvDir = Join-Path $repoRoot '.venv'
+    $venvPython = if ($IsWindows) { Join-Path $venvDir 'Scripts' 'python.exe' } else { Join-Path $venvDir 'bin' 'python' }
+    if (-not (Test-Path $venvPython)) {
+        Write-Host "Creating python venv at .venv and installing requirements-dev.txt..." -ForegroundColor Gray
+        & $pythonCmd -m venv $venvDir
+        if ($LASTEXITCODE -ne 0) { throw "python venv creation failed with exit code $LASTEXITCODE" }
+        & $venvPython -m pip install --quiet --upgrade pip
+        if ($LASTEXITCODE -ne 0) { throw "pip upgrade failed with exit code $LASTEXITCODE" }
+        & $venvPython -m pip install --quiet -r (Join-Path $serviceDir 'requirements-dev.txt')
+        if ($LASTEXITCODE -ne 0) { throw "pip install failed with exit code $LASTEXITCODE" }
+    }
+
+    Write-Host "Running webhook-receiver pytest suite..." -ForegroundColor Gray
+    $coverageJson = Join-Path $repoRoot 'coverage.json'
+    $covModules = @(
+        'webhook_receiver.app',
+        'webhook_receiver.config',
+        'webhook_receiver.event_store',
+        'webhook_receiver.filters',
+        'webhook_receiver.github'
+    )
+    $pytestArgs = @('-m', 'pytest', (Join-Path $serviceDir 'tests'), '-q')
+    foreach ($mod in $covModules) { $pytestArgs += "--cov=$mod" }
+    $pytestArgs += @('--cov-report=term-missing', '--cov-report=json')
+    & $venvPython @pytestArgs
+    if ($LASTEXITCODE -ne 0) { throw "pytest failed with exit code $LASTEXITCODE" }
+    if (-not (Test-Path $coverageJson)) { throw "pytest did not produce $coverageJson" }
+
+    $cov = Get-Content $coverageJson -Raw | ConvertFrom-Json -AsHashtable
+    $coveragePercent = [math]::Round($cov.totals.percent_covered, 2)
+    $color = if ($coveragePercent -ge $CoverageThreshold) { 'Green' } else { 'Red' }
+    Write-Host "webhook-receiver coverage: $coveragePercent% ($($cov.totals.covered_lines)/$($cov.totals.num_statements) lines)" -ForegroundColor $color
+
+    if ($coveragePercent -lt $CoverageThreshold) {
+        throw "webhook-receiver coverage $coveragePercent% is below threshold $CoverageThreshold%"
+    }
+
+    Write-Host "Python passed." -ForegroundColor Green
+}
+
 Set-Location $repoRoot
 
 switch ($Step) {
@@ -312,7 +381,8 @@ switch ($Step) {
     'scan'   { Step-Scan }
     'test'   { Step-Test }
     'dotnet' { Step-Dotnet }
-    'all'    { Step-Build; Step-Scan; Step-Test; Step-Dotnet }
+    'python' { Step-Python }
+    'all'    { Step-Build; Step-Scan; Step-Test; Step-Dotnet; Step-Python }
 }
 
 Write-Host "`nAll validation steps passed." -ForegroundColor Green
