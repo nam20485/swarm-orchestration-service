@@ -15,8 +15,9 @@ When asked to commit the current set of changes in the working copy, always:
 ## Monitor Workflows
 
 - After pushing, monitor the workflows to ensure they are running as expected.
-- If a workflow fails, investigate and fix the issue before proceeding.
-- Repeat the process until all workflows are running as expected.
+- If a workflow fails, run the `fix-failing-workflows` skill before any ad-hoc investigation (user
+  directive 2026-09-10).
+- Investigate and fix the issue before proceeding; repeat until all workflows pass.
 
 ## Branching
 
