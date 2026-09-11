@@ -35,6 +35,37 @@ stay green. When enabled but the sandbox API is unreachable or the workspace
 never materializes, the bridge raises and the envelope fails closed:
 `prompt_consumed {ok: false}` (no silent fallback to a scratch dir).
 
+## Demo evidence (Phase 4 exit criterion, 2026-09-10)
+
+Both paths demonstrated end-to-end on the private scratch repo
+`nam20485/swarm-orch-demo-scratch` (retained as evidence — deletion needs a
+`delete_repo` scope no current token holds):
+
+- **Path (a) — new app** (delivery `demo-path-a-4`, session 20:04–21:05):
+  webhook → queue → sandbox-materialized workspace (harness clone with swarm
+  assets, token-free git config, origin removed) → the session cloned the
+  scratch repo into its workspace, wrote `plan_docs/application_plan.md`
+  (10.5 KB, committed), ran gh-issue-tracking-init → **Plan #8
+  {plan, gh-issue-tracking:init-success} → Epic 1 #9 → Stories 1.1–1.4
+  #10–13** with the full taxonomy labels. Hierarchy live ~42 min in.
+- **Path (b) — new feature** (delivery `demo-path-b-1`, queued FIFO behind (a),
+  ran ~21:05–21:22): the session DISCOVERED the existing hierarchy and filed
+  **Epic 2 #15 + Story 2.1 #16** under it with the same taxonomy — no re-init
+  (Decision 9).
+- **Boundary, honestly**: one 60-min ACP session comfortably covers
+  plan + tracking-init and feature filing, but not full story implementation —
+  session (a) continued into implementation after the hierarchy and hit the
+  prompt ceiling. The swarm itself remains ZCode-native (plan §6): under
+  opencode the session drives the assets' entry points (skills, scripts) rather
+  than spawning ZCode subagents; full swarm execution stays harness-gated.
+- **Robustness observed live**: timeout path releases the sandbox cleanly;
+  graceful listener SIGINT cancels the consumer and releases mid-session
+  (shielded path); FIFO sequencing (b waited behind a); the detached pipeline
+  (setsid listener + direct-DLL API) survived host-app force-closes.
+- **Ops notes**: the SwarmSandbox AppHost remains blocked in this environment
+  by DCP k8s-watch timeouts — the standalone API (built DLL + env connection
+  string) is the working pattern; Postgres via a local container.
+
 ## Options evaluated
 
 ### (i) opencode inside the provisioned container — REJECTED
