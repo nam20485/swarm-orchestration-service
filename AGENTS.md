@@ -2,7 +2,7 @@
 
 ## Repository identity
 
-This repository — **`intel-agency/agent-context`** — is the **GitHub template repo**: the substrate from which each downstream instance is cloned to house a unique app plan and develop it. Any other repo name is a **clone instance** of this template, so when the user refers to "a downstream clone", "an instance", "the template", or names a different repo, treat it as a clone seeded from this one.
+This repository — **`swarm-orchestration-service`** — is the **orchestration service**: a GitHub webhook listener whose accepted deliveries feed a typed `PromptInfo` queue and an ACP host that drives agent CLIs (opencode first), with SwarmSandbox provisioning the execution environments (plan of record: [`docs/plans/orchestrator-service-simplification.md`](docs/plans/orchestrator-service-simplification.md); see [`README.md`](README.md) for the service itself). It is a **fork-style clone** of the swarm-context template (`intel-agency/agent-context`): the template remains the substrate from which downstream instances are cloned, so when the user refers to "the template", "a downstream clone", or "an instance", treat it as a repo seeded from that one; this repo merges `upstream/development` on demand, each sync a reviewed PR. The `.agents/` system below is inherited from the template and stays the single source of truth for project-specific decisions, conventions, and history.
 
 ## Memory and Rules
 
@@ -56,7 +56,7 @@ When relocating content into a rules file, the AGENTS.md section that replaces i
 
 ## Validation
 
-Detailed validation, testing, and TDD rules live in [`.agents/rules/validation.md`](.agents/rules/validation.md). Test coverage must be maintained > 85%. Includes repo-verified Pester 5 gotchas (single `BeforeAll` per `Describe`; no backtick fences inside `@"…"@` here-strings) — read before writing Pester tests.
+Detailed validation, testing, and TDD rules live in [`.agents/rules/validation.md`](.agents/rules/validation.md). Test coverage must be maintained > 85%. Includes repo-verified Pester 5 gotchas (single `BeforeAll` per `Describe`; no backtick fences inside `@"…"@` here-strings) — read before writing Pester tests. The gate also has a **Python branch** (`validation.ps1 -Step python`: pytest + coverage for `src/webhook_receiver`) and an **e2e branch** (`-Step e2e`: the hermetic `scripts/e2e-orchestration.ps1` simulator smoke); both run in the default `-Step all`.
 
 ## CI/CD Pipeline Requirements
 
