@@ -1,3 +1,51 @@
+"""Webhook listener app: verify → gate → queue → dashboard event surface.
+
+HTTP surface (Caddy exposes only ``/webhooks/github`` and ``/health``; the
+dashboard endpoints below are listener-local, reachable on the internal
+network or via an SSH/compose tunnel):
+
+- ``POST /webhooks/github`` — GitHub App deliveries: HMAC-verified, gated
+  (``filters.should_dispatch``), deduped, and enqueued as a PromptInfo.
+- ``GET /health`` — liveness probe.
+- ``GET /events`` — SSE stream (``text/event-stream``) of the EventStore:
+  full ring-buffer replay on subscribe, then live fan-out; a ``: keepalive``
+  comment is emitted after ``WEBHOOK_EVENTS_KEEPALIVE`` idle seconds. Each
+  frame carries the store's monotonic ``id``, the event ``type``, and the
+  event data as a JSON ``data`` line.
+
+**Stable event names** (dashboard contract — additive changes only; this
+table is the single source of truth, mirrored by ``src/webhook_receiver/
+README.md``). ``run_id`` is the PromptInfo ``id``; ``delivery_id`` is
+GitHub's ``X-GitHub-Delivery``:
+
+=========================  ================================================
+Event type                 Data
+=========================  ================================================
+``webhook_received``       delivery_id, event, action, repo
+``webhook_filtered``       delivery_id, event, action, reason
+``webhook_accepted``       delivery_id, event, action, repo, sender, label
+``prompt_queued``          id, delivery_id, repo, event, action, label
+``prompt_consumed``        id, delivery_id, ok; on success also repo,
+                           event, action, label, session_id, stop_reason;
+                           on failure instead error
+``webhook_duplicate``      delivery_id, event, action
+``sandbox_provisioned``    run_id, sandbox_id, container_name, workspace
+``sandbox_released``       run_id, sandbox_id, ok
+``agent_session_started``  run_id, session_id, protocol_version
+``agent_message_chunk``    run_id, text
+``agent_tool_call``        run_id, tool_call_id, title, kind, status
+``agent_usage``            run_id, used, size, cost
+``agent_permission``       run_id, title, action, reason
+``agent_finished``         run_id, session_id, stop_reason, ok,
+                           error (failures only)
+=========================  ================================================
+
+Emitter sources: the webhook routes here (``webhook_*``), the queue consumer
+(``prompt_*``, see ``prompt_queue.py``), the SwarmSandbox bridge
+(``sandbox_*``, see ``sandbox_bridge.py``), and the ACP host session mapping
+(``agent_*``, see ``acp_host.py``).
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -8,7 +56,7 @@ from contextlib import asynccontextmanager, suppress
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from webhook_receiver.acp_host import AcpHost
 from webhook_receiver.config import Settings
@@ -19,6 +67,14 @@ from webhook_receiver.prompt_builder import build_orchestration_prompt
 from webhook_receiver.prompt_queue import PromptInfo, PromptQueue
 
 logger = logging.getLogger(__name__)
+
+
+def _sse_frame(item: dict[str, Any] | None) -> str:
+    """Format one EventStore entry (or keepalive ``None``) as an SSE frame."""
+    if item is None:
+        return ": keepalive\n\n"
+    data = json.dumps(item["data"], separators=(",", ":"))
+    return f"id: {item['id']}\nevent: {item['type']}\ndata: {data}\n\n"
 
 
 def create_app(
@@ -63,6 +119,34 @@ def create_app(
     @app.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/events")
+    async def events() -> StreamingResponse:
+        """Stream the EventStore to the dashboard over SSE.
+
+        The subscriber's blocking ``next`` runs one call at a time on the
+        loop's default thread pool, so a slow dashboard client never blocks
+        the event loop; on disconnect the async generator's ``finally``
+        deregisters the subscriber immediately (a straggling pool thread
+        wakes within one keepalive and exits harmlessly). Each connected
+        client holds one pool thread while idle — the dashboard audience is
+        small by design.
+        """
+        subscriber = store.subscribe(keepalive=cfg.events_keepalive)
+
+        async def stream() -> AsyncIterator[str]:
+            try:
+                while True:
+                    item = await asyncio.to_thread(subscriber.__next__)
+                    yield _sse_frame(item)
+            finally:
+                subscriber.close()
+
+        return StreamingResponse(
+            stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache"},
+        )
 
     @app.post(
         "/webhooks/github",
