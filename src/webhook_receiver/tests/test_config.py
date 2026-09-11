@@ -129,7 +129,7 @@ class TestAcpFromEnv:
         cfg = Settings(
             host="h",
             port=1,
-            github_webhook_secret="s",
+            github_webhook_secret="FAKE-WEBHOOK-SECRET-FOR-TESTING",
             max_body_bytes=10,
             log_level="info",
         )
