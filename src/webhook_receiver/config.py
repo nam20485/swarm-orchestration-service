@@ -62,6 +62,20 @@ class Settings:
     # ``permission`` config (belt-and-braces; opencode removes the tool
     # entirely — spikes/acp/README.md deny-config finding).
     acp_denied_tools: tuple[str, ...] = ()
+    # --- SwarmSandbox bridge (Phase 4, plan §5 Decision 5) ---
+    # Off by default: the Phase 2 plain scratch-dir workspace is kept, so CI
+    # and dockerless local dev are unaffected. When enabled, the session cwd
+    # is a sandbox-materialized harness clone; an unreachable API or a
+    # workspace that never materializes fails the envelope (no fallback).
+    sandbox_enabled: bool = False
+    # Required when sandbox_enabled (validated at boot, like deny patterns).
+    sandbox_api_url: str = ""
+    # Branch the sandbox clones into the workspace (the API's per-request knob).
+    sandbox_branch: str = "development"
+    # Seconds to wait for the in-container clone to materialize host-side.
+    sandbox_ready_timeout: float = 300.0
+    # docker CLI used for the workspace extraction (docker cp).
+    sandbox_docker_bin: str = "docker"
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -87,6 +101,13 @@ class Settings:
                     f"ACP_DENY_PATTERNS entry {pattern!r} is not a valid regex: {exc}"
                 ) from exc
 
+        sandbox_enabled = _env_bool("SANDBOX_ENABLED", False)
+        sandbox_api_url = os.environ.get("SANDBOX_API_URL", "").strip()
+        if sandbox_enabled and not sandbox_api_url:
+            raise ValueError(
+                "SANDBOX_API_URL is required when SANDBOX_ENABLED is true."
+            )
+
         return cls(
             host=os.environ.get("WEBHOOK_HOST", "0.0.0.0"),
             port=int(os.environ.get("WEBHOOK_PORT", "8080")),
@@ -103,4 +124,13 @@ class Settings:
             acp_default_permission=default_permission,
             acp_deny_patterns=deny_patterns,
             acp_denied_tools=_env_list("ACP_DENIED_TOOLS"),
+            sandbox_enabled=sandbox_enabled,
+            sandbox_api_url=sandbox_api_url,
+            sandbox_branch=os.environ.get("SANDBOX_BRANCH", "development").strip()
+            or "development",
+            sandbox_ready_timeout=float(
+                os.environ.get("SANDBOX_READY_TIMEOUT", "300")
+            ),
+            sandbox_docker_bin=os.environ.get("SANDBOX_DOCKER_BIN", "docker").strip()
+            or "docker",
         )
