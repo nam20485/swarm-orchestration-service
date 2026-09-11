@@ -24,6 +24,11 @@
     Skip the Python branch (webhook-receiver pytest/coverage) for
     environments without python3. The Pester and .NET flows are unaffected.
 
+.PARAMETER SkipE2E
+    Skip the e2e orchestration smoke (scripts/e2e-orchestration.ps1 —
+    hermetic simulator run, no docker/opencode) for environments where
+    the python venv is unavailable.
+
 .EXAMPLE
     ./validation.ps1
     ./validation.ps1 -Step test
@@ -32,7 +37,7 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('build', 'scan', 'test', 'dotnet', 'python', 'all')]
+    [ValidateSet('build', 'scan', 'test', 'dotnet', 'python', 'e2e', 'all')]
     [string]$Step = 'all',
 
     [int]$CoverageThreshold = 85,
@@ -41,7 +46,9 @@ param(
 
     [switch]$SkipDotnet,
 
-    [switch]$SkipPython
+    [switch]$SkipPython,
+
+    [switch]$SkipE2E
 )
 
 $ErrorActionPreference = 'Stop'
@@ -380,6 +387,28 @@ function Step-Python {
     Write-Host "Python passed." -ForegroundColor Green
 }
 
+function Step-E2E {
+    if ($SkipE2E) {
+        Write-Host "`n=== E2E (skipped by -SkipE2E) ===" -ForegroundColor Yellow
+        return
+    }
+
+    Write-Host "`n=== E2E (orchestration listener simulator smoke) ===" -ForegroundColor Cyan
+
+    # Hermetic by design (no docker, no opencode, loopback only) but it needs
+    # the service venv; skip gracefully when the python branch never made one.
+    $venvPython = if ($IsWindows) { Join-Path $repoRoot '.venv' 'Scripts' 'python.exe' } else { Join-Path $repoRoot '.venv' 'bin' 'python' }
+    if (-not (Test-Path $venvPython)) {
+        Write-Host "E2E (skipped: no .venv found; run validation.ps1 -Step python first, or scripts/e2e-orchestration.ps1 bootstraps its own)" -ForegroundColor Yellow
+        return
+    }
+
+    & (Join-Path $repoRoot 'scripts' 'e2e-orchestration.ps1')
+    if ($LASTEXITCODE -ne 0) { throw "e2e-orchestration.ps1 failed with exit code $LASTEXITCODE" }
+
+    Write-Host "E2E passed." -ForegroundColor Green
+}
+
 Set-Location $repoRoot
 
 switch ($Step) {
@@ -388,7 +417,8 @@ switch ($Step) {
     'test'   { Step-Test }
     'dotnet' { Step-Dotnet }
     'python' { Step-Python }
-    'all'    { Step-Build; Step-Scan; Step-Test; Step-Dotnet; Step-Python }
+    'e2e'    { Step-E2E }
+    'all'    { Step-Build; Step-Scan; Step-Test; Step-Dotnet; Step-Python; Step-E2E }
 }
 
 Write-Host "`nAll validation steps passed." -ForegroundColor Green
