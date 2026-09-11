@@ -33,6 +33,7 @@ class TestFromEnv:
             "ACP_DEFAULT_PERMISSION",
             "ACP_DENY_PATTERNS",
             "ACP_DENIED_TOOLS",
+            "WEBHOOK_EVENTS_KEEPALIVE",
         ):
             monkeypatch.delenv(name, raising=False)
         cfg = Settings.from_env()
@@ -51,6 +52,8 @@ class TestFromEnv:
         assert cfg.acp_default_permission == "reject"
         assert cfg.acp_deny_patterns == ()
         assert cfg.acp_denied_tools == ()
+        # Dashboard SSE (Phase 5).
+        assert cfg.events_keepalive == 15.0
 
     def test_env_overrides(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("OS_WEBHOOK_SECRET", "FAKE-WEBHOOK-SECRET-FOR-TESTING")
@@ -63,6 +66,16 @@ class TestFromEnv:
         assert cfg.port == 9000
         assert cfg.max_body_bytes == 1024
         assert cfg.log_level == "debug"
+
+    def test_events_keepalive_override_and_validation(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("OS_WEBHOOK_SECRET", "FAKE-WEBHOOK-SECRET-FOR-TESTING")
+        monkeypatch.setenv("WEBHOOK_EVENTS_KEEPALIVE", "2.5")
+        assert Settings.from_env().events_keepalive == 2.5
+        monkeypatch.setenv("WEBHOOK_EVENTS_KEEPALIVE", "0")
+        with pytest.raises(ValueError, match="WEBHOOK_EVENTS_KEEPALIVE"):
+            Settings.from_env()
 
 
 class TestAcpFromEnv:
@@ -116,7 +129,7 @@ class TestAcpFromEnv:
         cfg = Settings(
             host="h",
             port=1,
-            github_webhook_secret="s",
+            github_webhook_secret="FAKE-WEBHOOK-SECRET-FOR-TESTING",
             max_body_bytes=10,
             log_level="info",
         )

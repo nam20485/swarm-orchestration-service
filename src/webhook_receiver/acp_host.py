@@ -268,7 +268,7 @@ class AcpHost:
                             PROTOCOL_VERSION,
                             client_capabilities=ClientCapabilities(),
                             client_info=Implementation(
-                                name="swarm-orchestration-host", version="0.1.0"
+                                name="swarm-orchestration-host", version="0.2.0"
                             ),
                         ),
                         step,

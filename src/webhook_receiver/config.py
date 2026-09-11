@@ -41,6 +41,10 @@ class Settings:
     github_webhook_secret: str
     max_body_bytes: int
     log_level: str
+    # --- Dashboard SSE (Phase 5) ---
+    # Idle seconds before GET /events emits a keepalive comment; must also
+    # stay below any proxy read timeout in front of the listener.
+    events_keepalive: float = 15.0
     # --- ACP host (Phase 2) ---
     acp_enabled: bool = True
     # Empty → resolve via PATH, then ~/.opencode/bin/opencode.
@@ -108,6 +112,10 @@ class Settings:
                 "SANDBOX_API_URL is required when SANDBOX_ENABLED is true."
             )
 
+        events_keepalive = float(os.environ.get("WEBHOOK_EVENTS_KEEPALIVE", "15"))
+        if events_keepalive <= 0:
+            raise ValueError("WEBHOOK_EVENTS_KEEPALIVE must be a positive number.")
+
         return cls(
             host=os.environ.get("WEBHOOK_HOST", "0.0.0.0"),
             port=int(os.environ.get("WEBHOOK_PORT", "8080")),
@@ -116,6 +124,7 @@ class Settings:
                 os.environ.get("WEBHOOK_MAX_BODY_BYTES", str(_DEFAULT_MAX_BODY_BYTES))
             ),
             log_level=os.environ.get("WEBHOOK_LOG_LEVEL", "info").lower(),
+            events_keepalive=events_keepalive,
             acp_enabled=_env_bool("ACP_ENABLED", True),
             acp_opencode_bin=os.environ.get("ACP_OPENCODE_BIN", "").strip(),
             acp_workspace_root=os.environ.get("ACP_WORKSPACE_ROOT", "").strip(),
