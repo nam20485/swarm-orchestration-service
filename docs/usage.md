@@ -23,8 +23,9 @@ dedupes, and acknowledges deliveries, but a session attempted inside it fails
 
 ## 2. Configure
 
-Create a `.env` next to `compose.yaml` (gitignored) or export variables for a
-host run. The essentials:
+Create a `.env` next to `compose.yaml` (gitignored; seed it from
+[`.env.example`](../.env.example) — every variable, grouped required vs
+optional) or export variables for a host run. The essentials:
 
 | Variable | Required | Purpose |
 |---|---|---|
