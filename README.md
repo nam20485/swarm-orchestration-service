@@ -119,7 +119,8 @@ With Docker, compose brings the listener plus a locked-down Caddy proxy
 `:80` or automatic HTTPS via `WEBHOOK_SITE_ADDRESS`):
 
 ```sh
-docker compose up --build --detach   # reads compose.yaml; secrets come from a gitignored .env next to it
+cp .env.example .env                 # then fill in OS_WEBHOOK_SECRET
+docker compose up --build --detach   # reads compose.yaml; secrets come from the gitignored .env
 ```
 
 ## Testing

@@ -5,9 +5,12 @@
 # ACP host (Phase 2) replaces it and must never exist as a container here
 # (docs/plans/completed/orchestrator-service-simplification.md §3/§7).
 #
-# Setup: create a .env file next to this file (gitignored) with at least:
+# Setup: cp .env.example .env next to this file (gitignored) and fill in at
+# least:
 #   OS_WEBHOOK_SECRET=<the GitHub App webhook secret>
-# Optional: WEBHOOK_SITE_ADDRESS (default :80), WEBHOOK_LOG_LEVEL (default info)
+# Optional: WEBHOOK_SITE_ADDRESS (default :80) plus the listener knobs
+# forwarded below (WEBHOOK_LOG_LEVEL, WEBHOOK_MAX_BODY_BYTES,
+# WEBHOOK_EVENTS_KEEPALIVE, DIRECT_BODY_ALLOWED_SENDERS) — see .env.example.
 services:
   webhook-receiver:
     build:
@@ -21,6 +24,10 @@ services:
       - WEBHOOK_HOST=0.0.0.0
       - WEBHOOK_PORT=8080
       - WEBHOOK_LOG_LEVEL=${WEBHOOK_LOG_LEVEL:-info}
+        # Defaults below mirror src/webhook_receiver/config.py — keep in sync.
+      - WEBHOOK_MAX_BODY_BYTES=${WEBHOOK_MAX_BODY_BYTES:-26214400}
+      - WEBHOOK_EVENTS_KEEPALIVE=${WEBHOOK_EVENTS_KEEPALIVE:-15}
+      - DIRECT_BODY_ALLOWED_SENDERS=${DIRECT_BODY_ALLOWED_SENDERS:-}
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
