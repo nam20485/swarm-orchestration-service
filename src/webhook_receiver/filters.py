@@ -6,7 +6,7 @@ import os
 # Ported from orchestrator-service @2bd6d06 (webhook_receiver/filters.py,
 # dispatch-gate section). The old repo's opencode-stderr trace blacklist that
 # shared this module is deliberately NOT ported — it is deleted by the
-# simplification plan (docs/plans/orchestrator-service-simplification.md §4).
+# simplification plan (docs/plans/completed/orchestrator-service-simplification.md §4).
 #
 # Hardcoded replica of the GitHub Actions orchestrator-agent.yml
 # orchestrate-job ``if:`` guard. The webhook-receiver must only dispatch for

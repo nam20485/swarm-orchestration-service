@@ -268,7 +268,7 @@ def create_app(
             payload=payload,
         )
         # Phase 3: fill the envelope's orchestration prompt at enqueue time
-        # (docs/plans/promptinfo-design.md §2) — the ACP host's prompt seam
+        # (docs/plans/completed/promptinfo-design.md §2) — the ACP host's prompt seam
         # sends a filled envelope prompt verbatim instead of deriving one.
         info = info.model_copy(update={"prompt": build_orchestration_prompt(info)})
         if queue.enqueue(info):

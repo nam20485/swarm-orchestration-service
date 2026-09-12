@@ -8,7 +8,7 @@ agent decides workflow progression from live tracking state.
 
 > Template lineage: this repository is a fork-style clone of the
 > `intel-agency/agent-context` template (Decision 8 in
-> [`docs/plans/orchestrator-service-simplification.md`](docs/plans/orchestrator-service-simplification.md)).
+> [`docs/plans/completed/orchestrator-service-simplification.md`](docs/plans/completed/orchestrator-service-simplification.md)).
 > The template stays the substrate from which new downstream instances are
 > cloned; shared harness assets flow into this repo through the `upstream`
 > remote, one reviewed merge per sync.
@@ -157,7 +157,7 @@ implemented.
 |---|---|
 | [`AGENTS.md`](AGENTS.md) | operating manual for AI agents working in this repo |
 | `.agents/` | durable memory, rules, and skills (inherited from the template) |
-| `docs/plans/` | plans of record, incl. the simplification plan that built this service |
+| `docs/plans/` | plans of record — open/parked at the top level, landed plans archived in `completed/` (incl. the simplification plan that built this service) |
 | `scripts/` | repo helper scripts, incl. the e2e orchestration smoke |
 | `src/webhook_receiver/` | the service: listener, queue, ACP host, sandbox bridge (see its README) |
 | `src/SwarmSandbox/` | Aspire + Docker sandbox-provisioning service (see [`src/SwarmSandbox/ARCHITECTURE.md`](src/SwarmSandbox/ARCHITECTURE.md)) |
@@ -169,4 +169,6 @@ implemented.
 
 Read [`AGENTS.md`](AGENTS.md) first: branches follow `dev/<name>`, every
 change passes `validation.ps1`, and `/safe-commit` runs before committing.
-Plan documents of record live under `docs/plans/`.
+Plan documents of record live under `docs/plans/` — landed plans are
+archived in `docs/plans/completed/`; open or parked ones sit at the top
+level (see [`docs/plans/README.md`](docs/plans/README.md)).

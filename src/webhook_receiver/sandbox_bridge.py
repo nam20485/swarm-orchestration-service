@@ -8,7 +8,7 @@ the clone to land, extracts the known-revision clone to a host workspace via
 ``docker cp``, and hands that directory to the ACP host as the session cwd.
 The sandbox stays the single provisioner of WHAT runs (repo-at-revision +
 toolchain); the host drives the client — see
-docs/plans/phase4-bridge-design.md for the decision and rejected options.
+docs/plans/completed/phase4-bridge-design.md for the decision and rejected options.
 
 Lifecycle per envelope: ``prepare`` (POST /api/sandboxes → poll-materialize →
 ``sandbox_provisioned`` event), the ACP session runs, then ``release``

@@ -3,7 +3,7 @@
 Status: PLAN ONLY — nothing here has been executed. Execute only on owner
 direction, after the new listener has taken the Caddy route and soaked.
 Date: 2026-09-11
-Related: [`orchestrator-service-simplification.md`](./orchestrator-service-simplification.md)
+Related: [`completed/orchestrator-service-simplification.md`](./completed/orchestrator-service-simplification.md)
 (§2 old-stack map, §7 Phase 5)
 
 ## 1. Scope
