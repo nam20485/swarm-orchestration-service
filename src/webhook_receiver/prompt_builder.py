@@ -3,7 +3,7 @@
 Replaces the old repo's 431-line match-clause prompt
 (``orchestration_prompt.jinja2.md`` pinned at orchestrator-service
 @2bd6d06) with natural-language direction built per
-docs/plans/orchestrator-service-simplification.md §3.3: the agent decides
+docs/plans/completed/orchestrator-service-simplification.md §3.3: the agent decides
 workflow progression from LIVE tracking state (issues and labels queried
 via ``gh``), never from a hardcoded label→label clause table.
 
@@ -16,7 +16,7 @@ sender-authorized, so its ENTIRE issue body becomes the prompt verbatim
 (the old clause table's direct-body special case, unchanged).
 
 The listener fills ``info.prompt`` with this builder's output at enqueue
-time (docs/plans/promptinfo-design.md §2); the ACP host's prompt seam sends
+time (docs/plans/completed/promptinfo-design.md §2); the ACP host's prompt seam sends
 the envelope's own prompt when filled (``acp_host.build_prompt``).
 Output is deterministic for a given envelope: stable prose plus a
 key-sorted EVENT_DATA JSON dump.

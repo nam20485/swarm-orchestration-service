@@ -3,7 +3,7 @@
 # Ported from orchestrator-service @2bd6d06 with the always-on
 # `orchestratorservice` (opencode serve) container deliberately dropped — the
 # ACP host (Phase 2) replaces it and must never exist as a container here
-# (docs/plans/orchestrator-service-simplification.md §3/§7).
+# (docs/plans/completed/orchestrator-service-simplification.md §3/§7).
 #
 # Setup: create a .env file next to this file (gitignored) with at least:
 #   OS_WEBHOOK_SECRET=<the GitHub App webhook secret>

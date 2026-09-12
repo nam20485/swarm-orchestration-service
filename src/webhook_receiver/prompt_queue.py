@@ -6,7 +6,7 @@ the consumer drives one cold ACP session per envelope and merges the run
 outcome into ``prompt_consumed``; without one it only marks envelopes
 consumed (the Phase 1 placeholder, still the default for a queue constructed
 without a host). Lifecycle events land in the EventStore either way.
-Substrate and durability posture per docs/plans/promptinfo-design.md §3/§5:
+Substrate and durability posture per docs/plans/completed/promptinfo-design.md §3/§5:
 unbounded ``asyncio.Queue``, bounded delivery-id dedup (last 1024), no
 persistence — GitHub redelivery is the recovery path for anything lost to a
 restart.
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Bounded dedup registry size (docs/plans/promptinfo-design.md §3): comfortably
+# Bounded dedup registry size (docs/plans/completed/promptinfo-design.md §3): comfortably
 # exceeds GitHub's redelivery window.
 _DEDUP_CAPACITY = 1024
 

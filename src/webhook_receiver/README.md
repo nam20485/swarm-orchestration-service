@@ -5,9 +5,9 @@ them, enqueues one typed envelope per accepted delivery, and drives one cold
 `opencode` ACP session per envelope — with optional SwarmSandbox-provisioned
 workspaces. All state is in-process; the design history and phase-by-phase
 rationale live in
-[`docs/plans/orchestrator-service-simplification.md`](../../docs/plans/orchestrator-service-simplification.md)
+[`docs/plans/completed/orchestrator-service-simplification.md`](../../docs/plans/completed/orchestrator-service-simplification.md)
 (§3 architecture, §5 decisions) and
-[`docs/plans/promptinfo-design.md`](../../docs/plans/promptinfo-design.md).
+[`docs/plans/completed/promptinfo-design.md`](../../docs/plans/completed/promptinfo-design.md).
 
 ## Request flow
 
