@@ -1,8 +1,8 @@
 # Orchestrator-Service Simplification — Analysis & Plan
 
-Status: APPROVED (owner decisions folded 2026-09-10 — see §5; ready for Phase 0)
+Status: COMPLETE — all §7 phases landed (Phase 0–5, 2026-09-10..11; final phase-5 merge PR #15); owner decisions folded 2026-09-10 (§5)
 Date: 2026-09-10
-Requirements source: [`docs/plans/orchestrator-service-integration.md`](./orchestrator-service-integration.md) (owner's direction notes)
+Requirements source: [`docs/plans/completed/orchestrator-service-integration.md`](./orchestrator-service-integration.md) (owner's direction notes)
 Codebase surveyed (reference only): `nam20485/orchestrator-service` @ branch `nam20485`, HEAD `2bd6d06` (2026-09-10; working tree there has 38 modified + 2 untracked files — the old repo stays untouched per Decision 8; port listener/webhook code from it, do not build in it)
 
 ## 1. Executive summary
