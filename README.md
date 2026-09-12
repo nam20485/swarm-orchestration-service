@@ -13,6 +13,10 @@ agent decides workflow progression from live tracking state.
 > cloned; shared harness assets flow into this repo through the `upstream`
 > remote, one reviewed merge per sync.
 
+Guides: [architecture](docs/architecture.md) — what the service is, its
+components, and how a delivery flows; [usage](docs/usage.md) — deploy,
+expose via Tailscale Funnel, wire the GitHub App, trigger and observe runs.
+
 ## How it works
 
 ```text
@@ -157,6 +161,7 @@ implemented.
 |---|---|
 | [`AGENTS.md`](AGENTS.md) | operating manual for AI agents working in this repo |
 | `.agents/` | durable memory, rules, and skills (inherited from the template) |
+| `docs/architecture.md`, `docs/usage.md` | service guides: components and delivery flow; deploy, trigger, observe |
 | `docs/plans/` | plans of record — open/parked at the top level, landed plans archived in `completed/` (incl. the simplification plan that built this service) |
 | `scripts/` | repo helper scripts, incl. the e2e orchestration smoke |
 | `src/webhook_receiver/` | the service: listener, queue, ACP host, sandbox bridge (see its README) |
