@@ -1,16 +1,6 @@
 {
   "mcp": {
     "servers": {
-      "sequential-thinking": {
-        "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-sequential-thinking@2026.7.4"],
-        "env": {}
-      },
-      "memory-graph": {
-        "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-memory@2026.7.4"],
-        "env": {}
-      },
       "web-reader": {
         "type": "http",
         "url": "https://api.z.ai/api/mcp/web_reader/mcp",
