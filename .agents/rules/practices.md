@@ -10,7 +10,6 @@ When starting a new project, session, task, or answering questions, always orien
 
 Inspect the following to orient yourself:
 
-- **Memory Tools** — query the Memory knowledge-graph: `memory_search_nodes` to find relevant entities by keyword, `memory_read_graph` to browse the whole graph, and `memory_open_nodes` to open specific entities.
 - **Memory Context File** — read `.agents/memory.md` (Current Activity, Completed Work Items, Decisions, Remember To Do) for the project's current state and history.
 - **Plans** — glob and read `plan_docs/`, `docs/plans/`, and `docs/` for existing plans, specs, and design docs relevant to the task.
 - **Uncommitted changes** — run `git status` and `git diff` to see pending work in the working directory.

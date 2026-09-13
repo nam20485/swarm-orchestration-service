@@ -84,10 +84,9 @@ Always plan non-trivial tasks before starting, investigate root causes using fir
 
 ## Tool Usage
 
-Detailed tool guidance and decision points live in [`.agents/rules/tools.md`](.agents/rules/tools.md). Always use `sequentialthinking` and the Memory knowledge-graph for all non-trivial tasks.
+Detailed tool guidance and decision points live in [`.agents/rules/tools.md`](.agents/rules/tools.md).
 
-- **Sequential-Thinking** — externalizes reasoning into discrete, revisable thought steps for non-trivial, multi-step problems.
-- **Memory** — persistent knowledge-graph store for durable, reusable context (entities, observations, relations) across sessions.
+- **Sequential-Thinking and Memory knowledge-graph MCP — use discontinued (2026-09-12)**: both were deemed redundant and inferior to the model's builtin reasoning and memory; their server defs are removed and this note replaces the former usage guidance. Do not call their tools or re-add them.
 - **Semantic Search (Codebase Indexing)** — finds code by meaning via AI embeddings; prefer as the first probe in unfamiliar code areas.
 - **Web & Repository Research (Z.AI MCP)** — remote web search (`webSearchPrime`), URL reader (`webReader`), and public GitHub repo reader (`zread`).
 - **Exa Search (MCP)** — neural web search, code-context lookup, and site crawling; complement to Z.AI.

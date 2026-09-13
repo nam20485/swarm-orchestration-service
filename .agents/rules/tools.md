@@ -2,74 +2,13 @@
 
 Detailed tool guidance and decision points for this project.
 
-## Sequential-Thinking
+## Discontinued: Sequential-Thinking and Memory knowledge-graph
 
-Sequential-Thinking (`sequentialthinking`) externalizes reasoning into discrete, numbered thought steps that can build linearly *or* be revised, branched, and extended mid-stream. It is for dynamic, reflective problem-solving — not for generating one-shot answers.
-
-Use it for non-trivial, multi-step problems: planning, root-cause analysis, and problems with unclear scope. Do **not** use it for trivial, single-step tasks where a one-shot answer suffices.
-
-### When to use it
-
-- Problems that benefit from structured reasoning: breaking down complex problems into steps, planning/design with room for revision, analysis that may need course correction, problems whose full scope is not clear initially, multi-step solutions, tasks needing context maintained over many steps, and filtering out irrelevant information.
-
-### How to use it well
-
-- Start with an initial `totalThoughts` estimate, but treat it as adjustable — you can revise it up or down as you progress.
-- Let each thought build on the previous ones, but you are not locked into a linear path.
-- Generate a hypothesis, then verify it within the chain; repeat until you reach a satisfactory answer.
-- Express uncertainty explicitly when present, and ignore information irrelevant to the current step.
-
-### Revision and branching
-
-- **Revise** (`isRevision: true`, `revisesThought: <n>`) when questioning, course-correcting, or changing a previous decision. Feel free to question or revise previous thoughts.
-- **Branch** (`branchFromThought: <n>`, `branchId: "<id>"`) to explore an alternative approach or assumption non-linearly while leaving the original line of reasoning intact.
-
-### Adjusting and terminating
-
-- Use `needsMoreThoughts: true` if you reach the planned end but realize more reasoning is required — don't hesitate to add more thoughts even at the "end".
-- Only set `nextThoughtNeeded: false` when truly done and a satisfactory answer has been reached; provide a single, ideally correct answer as the final output.
-- Control flow with `nextThoughtNeeded` — don't rely on the thought count alone (if `thoughtNumber` exceeds `totalThoughts`, the server auto-bumps `totalThoughts` to match).
-
-## Memory
-
-Memory is a persistent knowledge-graph store (`@modelcontextprotocol/server-memory`) that survives across sessions and chats. Its data model is three primitives:
-
-- **Entities** — typed nodes with a unique `name`, a specific `entityType`, and a list of `observations`.
-- **Observations** — discrete string facts attached to an entity. **One fact per observation.**
-- **Relations** — directed edges (`from` → `to`) with a `relationType`, always stored in **active voice**.
-
-Use Memory for **durable, reusable context**, not transient scratch state (which belongs in TODO lists/chat). Never store secrets/PII (the store is plaintext). Search before creating to avoid duplicates; keep observations atomic, specific, and active-voiced.
-
-### When to store
-
-- Store durable facts: entity attributes, project/repository structure, decisions **and their rationale**, cross-component relationships, ownership, locations/paths/URLs/IDs, stable conventions.
-- Do **not** store secrets, credentials, tokens, or PII — the store is a plaintext local file.
-- Do **not** store large blobs, logs, or full file contents — store a reference (path/URL) instead.
-- Do **not** dump chat transcripts or transient task progress — keep the graph high-signal.
-
-### Search before create (de-duplicate)
-
-- Before creating any entity, call `search_nodes` (fuzzy match) and/or `open_nodes` (exact name) to find existing matches.
-- Prefer adding observations to an existing entity (`add_observations`) over creating a duplicate — `create_entities` silently ignores names that already exist, so a duplicate create loses the new observations.
-- Before creating a relation, confirm both endpoints exist; `create_relations` skips exact duplicates automatically.
-
-### Writing good observations and relations
-
-- Make each observation **atomic and self-contained** — it should make sense read in isolation.
-- Be **specific and concrete**: include values, IDs, versions, paths, URLs (e.g. `"uses PostgreSQL 16, host db.internal:5432"` beats `"uses a database"`).
-- Avoid vague judgements like `"is important"` — state the constraint or reason instead.
-- Use **active voice** for `relationType` (`"ServiceA calls ServiceB"`, not `"ServiceB is called by ServiceA"`) and reuse consistent verb phrases across the graph.
-
-### Entity naming and types
-
-- Use **unique, stable entity names** (the name is the identifier; renaming is not supported — delete and recreate).
-- Use **specific, consistent `entityType` values** (e.g. `microservice`, `cli-tool`, `adr`, `team`) rather than a generic `thing`.
-
-### Maintenance
-
-- When a fact changes or is contradicted, **delete the stale observation** (`delete_observations`) and add the corrected one.
-- Remove obsolete entities (`delete_entities` cascades to their relations) and obsolete edges (`delete_relations`).
-- Keep the graph tidy; don't let it bloat with low-value noise.
+Use of these MCP servers was discontinued on 2026-09-12 — both were deemed
+redundant and inferior to the model's builtin reasoning and memory. Their server
+definitions were removed from the MCP configs (`.opencode/opencode.jsonc` and,
+where present, `.zcode/config*.json`) and the former usage guidance is withdrawn;
+do not call their tools or re-add usage guidance.
 
 ## Semantic Search (Codebase Indexing)
 
