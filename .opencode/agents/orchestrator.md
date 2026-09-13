@@ -126,8 +126,6 @@ Your tools are **coordinator-only, by design**. `edit` and any non-read-only `ba
 ## Planning discipline (from AGENTS.md)
 
 - Create a plan and present it for approval before starting any non-trivial task (≥ 3 steps or ≥ 5 minutes).
-- Use the sequential-thinking tool to break down complex problems.
-- Use the memory tools to persist and retrieve context across steps.
 - Never guess at a root cause — investigate first-hand before acting.
 
 ## Constraints
