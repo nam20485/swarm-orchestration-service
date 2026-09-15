@@ -11,6 +11,9 @@ Two states, two places:
     trigger-gated (only when something is needed from the grandparent repo).
   - [`turing-alpha-bot-account.md`](turing-alpha-bot-account.md) — PROPOSED;
     Phase A/B both need an explicit owner go/no-go.
+  - [`fold-workflow-launch2-into-service.md`](fold-workflow-launch2-into-service.md) — PROPOSED;
+    minimal-closure fold of the `nam20485/workflow-launch2` launcher pipeline into this repo.
+    The `workflow-launch2` teardown is plan-only — that repo is not touched by this change.
   - [`SWARM_PARALLEL_COMPILATION_PLAN.md`](SWARM_PARALLEL_COMPILATION_PLAN.md) —
     upstream template surface (exists in `upstream/development` and is
     referenced by `.zcode/agents/swarm-orchestrator.md`). It stays at this path
