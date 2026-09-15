@@ -314,6 +314,16 @@ function Assert-NoTemplatePlaceholdersRemaining
     throw "Template placeholder replacement incomplete. Remaining matches:`n$($matchSummary -join "`n")"
 }
 
+function Test-OwnerVisibilityPolicy
+{
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Owner,
+        [Parameter(Mandatory)][string]$Visibility
+    )
+    return ($Owner -eq 'intel-agency' -or $Visibility -eq 'public')
+}
+
 function New-GitHubRepository
 {
     [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]

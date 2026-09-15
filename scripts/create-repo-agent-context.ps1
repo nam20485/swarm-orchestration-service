@@ -10,15 +10,18 @@
     Thin wrapper over the existing `create-repo-with-plan-docs.ps1` + the new
     `cleanup-template-state.ps1` and `trigger-gh-issue-tracking-init.ps1`.
 
-    It accepts the same core parameters as `create-repo-from-slug.ps1` (Slug,
-    Owner, Visibility, Count, Yes) plus agent-context-specific ones
-    (-TriggerHierarchyInit, default $true). The legacy project-setup dispatch
-    (`/orchestrate-dynamic-workflow $workflow_name = project-setup`) is never
-    fired by this wrapper, so other templates relying on the legacy trigger are
-    unaffected.
+    It accepts the core launch parameters (Slug, Owner, Visibility, Count,
+    Yes) plus agent-context-specific ones (-TriggerHierarchyInit, default
+    $true).
+
+    Owner/visibility policy: a private repo is only supported under `-Owner
+    intel-agency` (an Organization on the Enterprise plan); every other owner
+    must be `-Visibility public`. Enforced by `Test-OwnerVisibilityPolicy`
+    (from `repo-functions.ps1`) before any `gh` call, and it bails under
+    `-DryRun` too, so a dry run surfaces the same failure as a real launch.
 
     Pipeline order per repo:
-      1. create-repo-with-plan-docs.ps1 -SkipProjectSetup <params>
+      1. create-repo-with-plan-docs.ps1 <params>
       2. cleanup-template-state.ps1 -RepoRoot <clonePath>
       3. apply-headless-permissions.ps1 -RepoRoot <clonePath>
          (relax template `ask` -> `allow` so headless orchestrator dispatches
@@ -30,23 +33,32 @@
             glm-5.3-flash — are kept in the template for
             non-orchestrator interactive clones)
       4. import-labels.ps1 -Repo "$Owner/$RepoName"
-          -LabelsFile <launcher>/.github/.labels.json
+          -LabelsFile <this repo>/.github/.labels.json
       5. trigger-gh-issue-tracking-init.ps1 -Repo "$Owner/$RepoName"
-          -BootstrapLabelsFile <launcher>/.github/.labels.json
+          -BootstrapLabelsFile <this repo>/.github/.labels.json
 
-    The existing `create-repo-with-plan-docs.ps1` main loop is unchanged; only
-    the optional `-SkipProjectSetup` switch is added (default behavior
-    identical).
+    Every path is resolved from this script's own directory, never the current
+    working directory: plan docs are read from `-PlanDocsRoot` (default: the
+    sibling `workflow-launch2` checkout, which still holds the slug-indexed
+    `plan_docs/` store) and clones land in the sibling `dynamic_workflows/`.
 
 .PARAMETER Slug
     Base app-plan slug (prefix). A random suffix is appended to form the final
     repo name.
 
+.PARAMETER PlanDocsRoot
+    Root of the plan-docs store; the source directory is '<PlanDocsRoot>/<Slug>'.
+    Default: '<script dir>/../../workflow-launch2/plan_docs'. Point it elsewhere
+    to launch a slug that is not in the launcher checkout. A missing slug
+    directory throws before anything is created.
+
 .PARAMETER Owner
-    Repository owner. Default: intel-agency.
+    Repository owner. Default: intel-agency. Private repos are only supported
+    under this owner — see the owner/visibility policy above.
 
 .PARAMETER Visibility
-    Repository visibility: public or private.
+    Repository visibility: public or private. Public works under any owner;
+    private requires -Owner intel-agency.
 
 .PARAMETER Count
     How many repos to create from the slug.
@@ -75,10 +87,13 @@
     ./scripts/create-repo-agent-context.ps1 `
         -Slug "my-app" -Count 2 -Yes -DryRun
 
+.EXAMPLE
+    ./scripts/create-repo-agent-context.ps1 `
+        -Slug "my-app" -PlanDocsRoot '/path/to/other/plan_docs' -Yes
+
 .NOTES
-    Part of W1.5 (replace broken hierarchy-init trigger) from the
-    template-content-strategy plan.
-    See docs/plans/workflow-launch2-clone-pipeline-class2-cleanup.md.
+    Imported from the workflow-launch2 launcher; it predates the fold.
+    See docs/plans/fold-workflow-launch2-into-service.md.
 #>
 
 [CmdletBinding()]
@@ -89,7 +104,11 @@ param(
 
     [Parameter()]
     [ValidateNotNullOrEmpty()]
-    [string]$Owner = 'nam20485',
+    [string]$PlanDocsRoot = (Join-Path $PSScriptRoot '..' '..' 'workflow-launch2' 'plan_docs'),
+
+    [Parameter()]
+    [ValidateNotNullOrEmpty()]
+    [string]$Owner = 'intel-agency',
 
     [Parameter()]
     [ValidateSet('public', 'private')]
@@ -144,31 +163,49 @@ $permScript = Join-Path $scriptDir 'apply-headless-permissions.ps1'
 $modelScript = Join-Path $scriptDir 'strip-model-settings.ps1'
 $triggerScript = Join-Path $scriptDir 'trigger-gh-issue-tracking-init.ps1'
 $importLabelsScript = Join-Path $scriptDir 'import-labels.ps1'
+$repoFunctionsScript = Join-Path $scriptDir 'repo-functions.ps1'
 
-foreach ($required in @($createRepoScript, $cleanupScript, $permScript, $modelScript, $triggerScript, $importLabelsScript)) {
+foreach ($required in @($createRepoScript, $cleanupScript, $permScript, $modelScript, $triggerScript, $importLabelsScript, $repoFunctionsScript)) {
     if (-not (Test-Path -LiteralPath $required)) {
         throw "Required script not found: $required"
     }
+}
+
+# Shared helpers (Test-OwnerVisibilityPolicy) — dot-sourced before the policy
+# guard so nothing can reach `gh` or create a repo past it.
+. $repoFunctionsScript
+
+# Owner/visibility policy: intel-agency is an Enterprise-plan Organization, so
+# only its private repos get Cloud Actions minutes; a free-tier User's private
+# clone would have zero minutes and its dispatch workflows could never run.
+if (-not (Test-OwnerVisibilityPolicy -Owner $Owner -Visibility $Visibility)) {
+    throw ("Invalid owner/visibility combination: '{0}/{1}'. Private repos are only supported under the 'intel-agency' owner (Enterprise Cloud Actions minutes); free-tier private repos get no Actions minutes, so the clone's dispatch workflows could never run. Use -Owner intel-agency, or -Visibility public." -f $Owner, $Visibility)
 }
 
 # Agent-context template identity — hardcoded (this wrapper is agent-context-specific).
 $TemplateRepoName = 'agent-context'
 $TemplateOwner = 'intel-agency'
 
-# Launcher conventions.
-$PlanDocsDir = "./plan_docs/$Slug"
-$CloneParentDir = '../dynamic_workflows'
+# Script-root-relative, so the pipeline runs from either repo root: plan docs
+# come from the sibling workflow-launch2 slug store (-PlanDocsRoot overrides),
+# clones land in the dynamic_workflows/ both repos have always launched into.
+$PlanDocsDir = Join-Path $PlanDocsRoot $Slug
+$CloneParentDir = Join-Path $PSScriptRoot '..' '..' 'dynamic_workflows'
+if (-not (Test-Path -LiteralPath $PlanDocsDir)) {
+    throw "Plan docs directory not found for slug '$Slug': $PlanDocsDir (resolved from -PlanDocsRoot '$PlanDocsRoot'; pass -PlanDocsRoot to point at a different plan_docs root)"
+}
 
-# Source labels file lives in the launcher repo's .github/ (not necessarily the
-# clone's), so label imports work even when the agent-context template lacks a
-# .labels.json. This is the file every label (including the dispatch label) is
-# bootstrapped from.
+# Source labels file is this repo's own .github/.labels.json — the canonical
+# dispatch label set. It must come from here, not the clone: the agent-context
+# template ships no .labels.json, so label imports and bootstraps have no
+# per-clone source. This is the file every label (including the dispatch label)
+# is bootstrapped from.
 $sourceLabelsFile = Join-Path $scriptDir '..' '.github/.labels.json'
 if (-not (Test-Path -LiteralPath $sourceLabelsFile)) {
     throw "Source labels file not found: $sourceLabelsFile"
 }
 
-Write-Host "Calling create-repo-with-plan-docs.ps1 (with -SkipProjectSetup)..." -ForegroundColor Cyan
+Write-Host "Calling create-repo-with-plan-docs.ps1..." -ForegroundColor Cyan
 
 $createParams = @{
     RepoName          = $Slug
@@ -179,7 +216,6 @@ $createParams = @{
     CloneParentDir    = $CloneParentDir
     TemplateRepoName  = $TemplateRepoName
     TemplateOwner     = $TemplateOwner
-    SkipProjectSetup  = $true
 }
 if ($Yes)        { $createParams['Yes'] = $true }
 if ($LaunchEditor){ $createParams['LaunchEditor'] = $true }
@@ -250,7 +286,7 @@ foreach ($clonePath in $clonePaths) {
         Write-Host ' done' -ForegroundColor Green
     }
 
-    # Step 4: Import the launcher's full label set into the new repo so the
+    # Step 4: Import this repo's full label set into the new repo so the
     # dispatch label (and every other tracking label) exists before the trigger.
     # import-labels.ps1 only creates/updates missing labels, so it is idempotent
     # and safe to re-run.
@@ -269,7 +305,7 @@ foreach ($clonePath in $clonePaths) {
     # Step 5: Dispatch /gh-issue-tracking-init
     # Labeled gh-issue-tracking:direct-body so the orchestrator webhook runs the
     # issue body verbatim as a prompt, invoking the skill. The label is already
-    # imported above; BootstrapLabelsFile points at the launcher's source file as
+    # imported above; BootstrapLabelsFile points at this repo's source file as
     # a safety net for Ensure-DispatchBootstrapLabel (the clone may lack
     # .labels.json).
     if ($TriggerHierarchyInit) {

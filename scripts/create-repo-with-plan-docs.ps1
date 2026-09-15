@@ -12,6 +12,10 @@ into a docs folder inside each repo, then commits and pushes the changes. It fol
 verbs, proper parameter validation, non-interactive design, and optional DryRun with ShouldProcess confirmation gating for
 remote mutations.
 
+Owner/visibility policy (Create parameter set): a private repo is only supported under Owner intel-agency, an Organization
+on the Enterprise plan; every other owner must use public visibility. The check runs before any gh call and bails under
+-DryRun too. See Test-OwnerVisibilityPolicy in repo-functions.ps1.
+
 .PARAMETER RepoName
 Base repository name (prefix). A random suffix is appended to form the final repo name.
 
@@ -25,7 +29,7 @@ Path to the directory containing plan docs to copy into the new repo's plan_docs
 Path to the local parent directory where the repository will be cloned (final path will be <CloneParentDir>\<FullRepoName>).
 
 .PARAMETER Visibility
-Repository visibility. Must be 'public' or 'private'.
+Repository visibility. Must be 'public' or 'private'. Public works under any owner; private requires Owner intel-agency.
 
 .PARAMETER DryRun
 Simulate remote operations (repo create, git push) and local file copies without making changes. Logs actions only.
@@ -104,12 +108,6 @@ param(
     [Parameter(ParameterSetName = 'Create', HelpMessage = 'VS Code profile to use when launching the editor.')]
     [string]$EditorProfile = '.NET (Stripped)',
 
-    [Parameter(ParameterSetName = 'Create', HelpMessage = 'Trigger the project-setup workflow on the new repo after creation.')]
-    [bool]$TriggerProjectSetup = $true,
-
-    [Parameter(ParameterSetName = 'Create', HelpMessage = 'Skip the legacy project-setup trigger at the end of creation. Intended for callers that invoke trigger-gh-issue-tracking-init.ps1 as a separate step (e.g. create-repo-agent-context.ps1). Default behavior identical.')]
-    [switch]$SkipProjectSetup,
-
     [Parameter(ParameterSetName = 'Create', HelpMessage = 'How many repositories to create from the slug and plan docs.')]
     [ValidateScript({ $_ -ge 1 })]
     [int]$Count = 1,
@@ -175,6 +173,15 @@ if (Test-Path -LiteralPath $commonAuth) { . $commonAuth } else { Write-Verbose '
 $loggingModule = Join-Path $PSScriptRoot 'logging.ps1'
 if (Test-Path -LiteralPath $loggingModule) { . $loggingModule } else { Write-Verbose 'logging.ps1 not found; proceeding without structured logging' }
 Write-Host ' done' -ForegroundColor DarkGray
+
+# Owner/visibility policy — Create set only, since ReplaceOnly has no -Visibility.
+# intel-agency is an Enterprise-plan Organization, so only its private repos get
+# Cloud Actions minutes; a free-tier User's private clone gets none and its
+# dispatch workflows could never run. Checked here, before any gh call, so it
+# bails under -DryRun too.
+if ($PSCmdlet.ParameterSetName -eq 'Create' -and -not (Test-OwnerVisibilityPolicy -Owner $Owner -Visibility $Visibility)) {
+    throw ("Invalid owner/visibility combination: '{0}/{1}'. Private repos are only supported under the 'intel-agency' owner (Enterprise Cloud Actions minutes); free-tier private repos get no Actions minutes, so the clone's dispatch workflows could never run. Use -Owner intel-agency, or -Visibility public." -f $Owner, $Visibility)
+}
 
 $docsDir = 'plan_docs'
 
@@ -438,35 +445,6 @@ try {
         
         Write-Host -ForegroundColor Green       
         if (Get-Command Write-RunLog -ErrorAction SilentlyContinue) { Write-RunLog -Level 'INFO' -Step 'repo-done' -Message "Repo complete: $repoName" -Data @{ clonePath = $clonePath } }
-
-        # Trigger project-setup workflow on the new repo (legacy path, preserved
-        # for backward compatibility with other templates that still rely on the
-        # /orchestrate-dynamic-workflow project-setup dispatch).
-        if ($TriggerProjectSetup -and -not $SkipProjectSetup) {
-            Write-Host 'Triggering project-setup workflow...' -ForegroundColor Cyan -NoNewline
-            $triggerScript = Join-Path $PSScriptRoot 'trigger-project-setup.ps1'
-            if (Test-Path -LiteralPath $triggerScript) {
-                $bootstrapLabelsFile = Join-Path $clonePath '.github/.labels.json'
-                $triggerParams = @{ Repo = "$Owner/$repoName" }
-                if (Test-Path -LiteralPath $bootstrapLabelsFile) {
-                    $triggerParams['BootstrapLabelsFile'] = $bootstrapLabelsFile
-                }
-                elseif (-not $DryRun) {
-                    throw "Expected bootstrap labels file not found: $bootstrapLabelsFile"
-                }
-                if ($DryRun) { $triggerParams['DryRun'] = $true }
-                & $triggerScript @triggerParams
-                #Write-Host ' done' -ForegroundColor Green
-            } else {
-                Write-Warning "trigger-project-setup.ps1 not found at '$triggerScript'; skipping workflow trigger"
-            }
-        } else {
-            if ($SkipProjectSetup) {
-                Write-Verbose 'Skipping legacy project-setup trigger (-SkipProjectSetup); caller will invoke trigger-gh-issue-tracking-init.ps1 separately.'
-            } else {
-                Write-Verbose 'Skipping project-setup workflow trigger (-TriggerProjectSetup:$false)'
-            }
-        }
     }
 
     if (-not $Yes) {
