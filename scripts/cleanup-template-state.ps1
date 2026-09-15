@@ -39,10 +39,12 @@
     ./scripts/cleanup-template-state.ps1 -RepoRoot ".\my-app-delta12" -DryRun
 
 .NOTES
-    Class-2 cleanup step (W1.1–W1.3) from the template-content-strategy plan.
-    Should run AFTER clone + placeholder replacement but BEFORE Copy-PlanDocs,
-    so Update-TemplatePlaceholders doesn't substitute into files we're about to
-    delete. See docs/plans/workflow-launch2-clone-pipeline-class2-cleanup.md.
+    The Class-2 template-state cleanup step of the launch pipeline. Runs as
+    stage 2, AFTER Copy-PlanDocs + placeholder replacement (both happen inside
+    stage 1, create-repo-with-plan-docs.ps1). That ordering is harmless: this
+    script only removes template-self state under .agents/ and docs/plans/,
+    never the clone's freshly copied plan_docs/.
+    See docs/plans/fold-workflow-launch2-into-service.md.
 #>
 
 [CmdletBinding()]

@@ -18,10 +18,11 @@
     To use the legacy orchestration method instead, pass
     -Labels 'orchestration:dispatch'.
 
-    This is the replacement trigger for `trigger-project-setup.ps1`: the legacy
-    script dispatches `/orchestrate-dynamic-workflow $workflow_name = project-setup`
-    via `create-dispatch-issue.ps1`, which is incompatible with agent-context's
-    new structure. This script dispatches the correct follow-up.
+    It replaced the launcher's legacy `trigger-project-setup.ps1`, which
+    dispatched `/orchestrate-dynamic-workflow $workflow_name = project-setup`
+    via `create-dispatch-issue.ps1` — incompatible with agent-context's new
+    structure. That legacy script was deliberately not folded into this repo;
+    this is the only dispatch trigger.
 
     Reuses the existing `create-dispatch-issue.ps1` for issue creation and
     dot-sources the shared `dispatch-labels.ps1` library for the
@@ -63,10 +64,9 @@
         -Repo "intel-agency/my-app-delta12" -DryRun
 
 .NOTES
-    Part of W1.5 (replace broken hierarchy-init trigger) from the
-    template-content-strategy plan. Coexists with legacy
-    `trigger-project-setup.ps1` — does not replace or modify it.
-    See docs/plans/workflow-launch2-clone-pipeline-class2-cleanup.md.
+    Stage 5 of the agent-context launch pipeline. Originally the W1.5
+    replacement for the legacy hierarchy-init trigger in the launcher repo.
+    See docs/plans/fold-workflow-launch2-into-service.md.
 #>
 
 [CmdletBinding()]
@@ -97,7 +97,7 @@ if (-not (Test-Path -LiteralPath $createDispatch)) {
 }
 
 # Dot-source the shared dispatch-labels library for Ensure-DispatchBootstrapLabel.
-# (Functions only; does not run any dispatch logic, unlike trigger-project-setup.ps1.)
+# (Functions only; importing it does not run any dispatch logic.)
 $dispatchLabels = Join-Path $scriptDir 'dispatch-labels.ps1'
 if (-not (Test-Path -LiteralPath $dispatchLabels)) {
     throw "Required helper not found: $dispatchLabels (for Ensure-DispatchBootstrapLabel)"

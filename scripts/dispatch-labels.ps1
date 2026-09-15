@@ -7,9 +7,10 @@ Shared label-bootstrap helpers for dispatch-trigger scripts.
 .DESCRIPTION
 Functions only (no param() block, no top-level execution) so callers can
 dot-source this library directly to reuse Ensure-DispatchBootstrapLabel without
-running any dispatch logic. Extracted from trigger-project-setup.ps1 so both
-trigger-project-setup.ps1 and trigger-gh-issue-tracking-init.ps1 share one
-implementation. Do NOT add top-level statements here.
+running any dispatch logic. Originally extracted from the launcher's legacy
+trigger-project-setup.ps1 so both it and trigger-gh-issue-tracking-init.ps1
+shared one implementation; in this repo the latter is the only consumer.
+Do NOT add top-level statements here.
 #>
 
 function Get-BootstrapLabelDefinition {
