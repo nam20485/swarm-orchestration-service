@@ -169,7 +169,10 @@ function Step-Test {
     $testPaths = @(
         (Join-Path $repoRoot '.agents/skills/gh-issue-tracking-init/scripts/tests'),
         (Join-Path $repoRoot '.agents/skills/update-powershell-standard/scripts/tests'),
-        (Join-Path $repoRoot '.agents/skills/swarm/scripts/tests')
+        (Join-Path $repoRoot '.agents/skills/swarm/scripts/tests'),
+        # The repo-root launcher suites run here but stay out of $coveragePaths on
+        # purpose: the coverage gate must keep measuring only the skill scripts.
+        (Join-Path $repoRoot 'tests')
     )
     $coveragePaths = @(
         (Join-Path $repoRoot '.agents/skills/gh-issue-tracking-init/scripts'),
