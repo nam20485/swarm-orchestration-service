@@ -222,8 +222,13 @@ if ($LaunchEditor){ $createParams['LaunchEditor'] = $true }
 if ($DryRun)     { $createParams['DryRun'] = $true }
 
 # Invoke the existing workflow. It returns each clone path on the pipeline
-# (Write-Output) and signals failure via its exit code (exit 1).
-$clonePaths = @(& $createRepoScript @createParams | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Container) })
+# (Write-Output) and signals failure via its exit code (exit 1 on error, exit 0
+# on success — the script owns both, so $LASTEXITCODE is authoritative here).
+# A -DryRun launch never creates the clone directory (the pipeline makes no
+# filesystem changes), so the container check applies to real runs only.
+$clonePaths = @(& $createRepoScript @createParams | Where-Object {
+    $_ -and ($DryRun -or (Test-Path -LiteralPath $_ -PathType Container))
+})
 if ($LASTEXITCODE -ne 0) {
     throw "create-repo-with-plan-docs failed (exit code $LASTEXITCODE)."
 }
@@ -272,13 +277,25 @@ foreach ($clonePath in $clonePaths) {
     & $modelScript @modelParams
     Write-Host ' done' -ForegroundColor Green
 
-    # Amend the seed commit to include the cleanup + permission + model changes.
+    # Amend the seed commit to include the cleanup + permission + model changes,
+    # then force-push it back over main: stage 1 already pushed the pre-cleanup
+    # seed commit, so an amend that stays local would leave origin/main shipping
+    # the template's ask-permissions and model pins — exactly what steps 3/3.5
+    # exist to strip. --force-with-lease is safe because the clone is ours alone
+    # since that push; stage 1's own post-rebase amend uses the same pattern.
     if (-not $DryRun) {
         Write-Host 'Amending seed commit with cleanup + permissions + stripped models...' -ForegroundColor Cyan -NoNewline
         Push-Location -LiteralPath $clonePath
         try {
             & git add .
             & git commit --amend --no-edit --message "Seed $repoName from template with plan docs, placeholder replacements, Class-2 cleanup, headless permissions, and stripped model pins"
+            if ($LASTEXITCODE -ne 0) {
+                throw "git commit --amend failed (exit code $LASTEXITCODE) in $clonePath."
+            }
+            & git push --force-with-lease origin HEAD:main
+            if ($LASTEXITCODE -ne 0) {
+                throw "git push --force-with-lease failed (exit code $LASTEXITCODE) in $clonePath — the amended seed commit did not reach origin/main."
+            }
         }
         finally {
             Pop-Location

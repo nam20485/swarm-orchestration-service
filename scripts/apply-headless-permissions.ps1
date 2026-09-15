@@ -96,6 +96,12 @@ Write-Host '=== apply-headless-permissions ===' -ForegroundColor Cyan
 if ($DryRun) { Write-Host '[DRY-RUN MODE]' -ForegroundColor Yellow }
 
 if (-not (Test-Path -LiteralPath $RepoRoot)) {
+    if ($DryRun) {
+        # A -DryRun launch never creates the clone directory, so there is no
+        # tree to walk — mirror the no-op instead of failing the pipeline.
+        Write-Host '[dry-run] RepoRoot does not exist yet (clone is simulated) — nothing to relax.' -ForegroundColor Yellow
+        exit 0
+    }
     throw "RepoRoot not found: $RepoRoot"
 }
 

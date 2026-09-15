@@ -419,3 +419,34 @@ Describe 'create-repo-agent-context.ps1 early exits' {
         (Get-MessageText $script:NoSlugOutput) | Should -BeLike ('*' + (Get-MessageText 'Error: -Slug is required.') + '*') -Because 'the script must say which parameter is missing'
     }
 }
+
+Describe 'create-repo-agent-context.ps1 seed-commit push' {
+    BeforeAll {
+        # Static contract only — executing the amend/push path would need the
+        # full git/gh pipeline, forbidden by the SAFETY note at the top of this
+        # file. The AST is what the 'parameter surface' Describe already uses.
+        $parseErrors = $null
+        $script:WrapperAst = [System.Management.Automation.Language.Parser]::ParseFile($script:EntryPoint, [ref]$null, [ref]$parseErrors)
+        $parseErrors | Should -BeNullOrEmpty
+    }
+
+    It 'force-pushes the amended seed commit inside the same non-DryRun guard' {
+        $guards = @($script:WrapperAst.FindAll({
+            param($node)
+            $node -is [System.Management.Automation.Language.IfStatementAst] -and
+            $node.Extent.Text -match 'commit\s+--amend\s+--no-edit'
+        }, $true))
+        $guards.Count | Should -Be 1 -Because 'the wrapper amends the seed commit exactly once'
+        $guards[0].Extent.Text | Should -Match '-not\s+\$\s*DryRun' -Because 'a dry run must amend nothing'
+        $guards[0].Extent.Text | Should -Match 'git\s+push\s+--force-with-lease\s+origin\s+HEAD:main' -Because 'the amended seed commit must reach origin/main — stage 1 already pushed the pre-cleanup commit (PR #20 CRITICAL: amend without push shipped the template ask-permissions and model pins)'
+    }
+
+    It 'aborts loudly when the amend or the push fails' {
+        $throwTexts = @($script:WrapperAst.FindAll({
+            param($node)
+            $node -is [System.Management.Automation.Language.ThrowStatementAst]
+        }, $true) | ForEach-Object { $_.Extent.Text })
+        ($throwTexts -join "`n") | Should -Match 'git commit --amend failed' -Because 'a failed amend must stop the pipeline'
+        ($throwTexts -join "`n") | Should -Match 'git push --force-with-lease failed' -Because 'an amend that never reaches the remote is the PR #20 defect'
+    }
+}

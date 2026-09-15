@@ -34,7 +34,7 @@
 .PARAMETER BootstrapLabelsFile
     Path to the clone's `.github/.labels.json` used to bootstrap (create on the
     target repo) any labels in -Labels that do not yet exist. Throws if missing
-    when -Labels is non-empty and -DryRun is not.
+    when -Labels is non-empty.
 
 .PARAMETER Labels
     Labels to attach to the dispatch issue. Each is bootstrapped from

@@ -105,6 +105,17 @@ function New-RepoSecret
         [Parameter(Mandatory)][string]$RepoName,
         [Parameter(Mandatory)][string]$SecretName
     )
+    if ($DryRun)
+    {
+        # A dry run creates no repo and sets no secrets, but it still mirrors the
+        # guard so the operator hears about it: reading the env var must never
+        # kill a -DryRun launch.
+        if (-not [System.Environment]::GetEnvironmentVariable($SecretName)) {
+            Write-Warning "[dry-run] Environment variable for secret '$SecretName' is unset — a real run would throw here."
+        }
+        Write-Verbose "[dry-run] Would create GitHub repo secret: $SecretName for $Owner/$RepoName"
+        return
+    }
     $secretBody = [System.Environment]::GetEnvironmentVariable($SecretName)
     if (-not $secretBody) { throw "Environment variable for secret '$SecretName' not found." }
     $ghArgs = @('secret', 'set', $SecretName, '--body', $secretBody, '--repo', "$Owner/$RepoName")
@@ -147,6 +158,13 @@ function Get-TemplatePlaceholderMatches
         [Parameter(Mandatory)][string]$RepoRoot,
         [Parameter(Mandatory)][string]$TemplateText
     )
+
+    if ($DryRun -and -not (Test-Path -LiteralPath $RepoRoot))
+    {
+        # A -DryRun launch never creates the clone, so there is no tree to scan.
+        Write-Verbose "[TRACE:Scan] [dry-run] RepoRoot does not exist yet, nothing to match: $RepoRoot"
+        return @()
+    }
 
     $templatePattern = [regex]::Escape($TemplateText)
     Write-Verbose "[TRACE:Scan] Scanning for placeholder matches under: $RepoRoot"
@@ -204,6 +222,14 @@ function Update-TemplatePlaceholders
         [Parameter(Mandatory)][string]$TemplateText,
         [Parameter(Mandatory)][string]$ReplacementText
     )
+
+    if ($DryRun -and -not (Test-Path -LiteralPath $RepoRoot))
+    {
+        # A -DryRun launch never creates the clone, so there is no tree to
+        # rewrite — the placeholder pass has nothing to mirror.
+        Write-Verbose "[TRACE:Replace] [dry-run] RepoRoot does not exist yet, nothing to replace: $RepoRoot"
+        return
+    }
 
     $templatePattern = [regex]::Escape($TemplateText)
     Write-Verbose "[TRACE:Replace] === Update-TemplatePlaceholders ==="
@@ -352,6 +378,14 @@ function Get-ClonePath
 {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Parent, [Parameter(Mandatory)][string]$Name)
+    if ($DryRun)
+    {
+        # No filesystem changes under -DryRun: skip creating the parent and the
+        # now-impossible Resolve-Path, and just report the path the clone would
+        # get.
+        Write-Verbose "[dry-run] Would create parent directory if missing: $Parent"
+        return (Join-Path $Parent $Name)
+    }
     if (-not (Test-Path -LiteralPath $Parent))
     {
         New-Item -ItemType Directory -Path $Parent | Out-Null
@@ -365,6 +399,14 @@ function Invoke-GitClone
 {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Owner, [Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][string]$Dest)
+    if ($DryRun -and -not (Test-Path -LiteralPath $Dest))
+    {
+        # The pre-creation New-Item below is a real filesystem change: under a
+        # dry run the clone is simulated, so neither the directory nor the
+        # git clone happens.
+        Write-Verbose "[dry-run] Would create $Dest and clone git@github.com:$Owner/$Name.git into it"
+        return
+    }
     if (Test-Path -LiteralPath $Dest)
     {
         # Validate the existing clone has a .git directory and a valid HEAD

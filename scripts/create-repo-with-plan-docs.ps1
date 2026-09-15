@@ -59,7 +59,7 @@ Template repository owner used to create new repos and to substitute template ow
 ./scripts/create-repo-with-plan-docs.ps1 -RepoName planning -PlanDocsDir .\plan_docs\advanced_memory -CloneParentDir .\dynamic_workflows -Visibility public -DryRun -Verbose
 
 .EXAMPLE
-./scripts/create-repo-with-plan-docs.ps1 -RepoName planning -PlanDocsDir E:\plan_docs -CloneParentDir E:\work\dynamic_workflows -Owner myorg -Visibility private
+./scripts/create-repo-with-plan-docs.ps1 -RepoName planning -PlanDocsDir E:\plan_docs -CloneParentDir E:\work\dynamic_workflows -Owner myorg -Visibility public
 
 .OUTPUTS
 System.String. The absolute clone destination path of the created repository.
@@ -203,7 +203,7 @@ try {
         Assert-NoTemplatePlaceholdersRemaining -RepoRoot $resolvedRepoRoot -TemplateText $TemplateRepoName
         Write-Host ' done' -ForegroundColor Green
         Write-Output "SUCCESS: template placeholders replaced and validated in '$resolvedRepoRoot'"
-        return
+        exit 0
     }
 
     # Derive the owner to use for image/registry references
@@ -310,8 +310,12 @@ try {
         Write-Host ' done' -ForegroundColor Green
         if (Get-Command Write-RunLog -ErrorAction SilentlyContinue) { Write-RunLog -Level 'INFO' -Step 'copy-docs' -Message 'Copied plan docs' -Data @{ sourceDir = $PlanDocsDir; repoRoot = $clonePath } }
 
-        # Snapshot file list before replacement
-        $preFiles = @(Get-ChildItem -LiteralPath $clonePath -Recurse -Force -File | Where-Object { $_.FullName -notmatch '[/\\]\.git([/\\]|$)' })
+        # Snapshot file list before replacement. A -DryRun launch creates no
+        # clone directory, so there may be no tree to enumerate.
+        $preFiles = @()
+        if (Test-Path -LiteralPath $clonePath) {
+            $preFiles = @(Get-ChildItem -LiteralPath $clonePath -Recurse -Force -File | Where-Object { $_.FullName -notmatch '[/\\]\.git([/\\]|$)' })
+        }
         Write-Verbose "[TRACE:Main] Pre-replacement file count: $($preFiles.Count)"
         Write-Verbose "[TRACE:Main] Clone path: $clonePath"
         Write-Verbose "[TRACE:Main] Clone path exists: $(Test-Path -LiteralPath $clonePath)"
@@ -459,6 +463,11 @@ try {
 
     Write-Host '=== All done ===' -ForegroundColor Green
     if (Get-Command Complete-RunLog -ErrorAction SilentlyContinue) { Complete-RunLog -Status 'SUCCESS' }
+    # Own the success exit code: callers (create-repo-agent-context.ps1) test
+    # $LASTEXITCODE after this script runs in-process, and a bare completion
+    # would leave whatever a stray native command last wrote (e.g. the
+    # gh auth status probe, or code-insiders under -LaunchEditor).
+    exit 0
 }
 catch {
     if (Get-Command Complete-RunLog -ErrorAction SilentlyContinue) { Complete-RunLog -Status 'FAILURE' -ErrorMessage $_.Exception.Message }

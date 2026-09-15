@@ -35,7 +35,7 @@ Built from each script's header comments and `param()` block. **Read the file he
 - **Stage 2** — `cleanup-template-state.ps1`: reset the clone's template memory/plan state.
 - **Stage 3** — `apply-headless-permissions.ps1`: relax `ask` → `allow` so a headless dispatch never blocks.
 - **Stage 3.5** — `strip-model-settings.ps1`: drop model pins so this service chooses the model.
-- **Amend** the seed commit, folding stages 2–3.5 into the clone's first commit.
+- **Amend** the seed commit, folding stages 2–3.5 into the clone's first commit, then `git push --force-with-lease origin HEAD:main` so the cleanup reaches the remote — stage 1 already pushed the pre-cleanup seed commit.
 - **Stage 4** — `import-labels.ps1`: sync `.github/.labels.json` into the new repo, so every dispatch label exists before the trigger.
 - **Stage 5** — `trigger-gh-issue-tracking-init.ps1`: file the `gh-issue-tracking:direct-body` issue that this service's webhook turns into an agent session.
 
@@ -43,13 +43,13 @@ Built from each script's header comments and `param()` block. **Read the file he
 
 **Owner/visibility policy.** `Test-OwnerVisibilityPolicy` (in `repo-functions.ps1`) bails unless `$Owner -eq 'intel-agency' -or $Visibility -eq 'public'` — public under any owner, private only under `intel-agency`. Both entry points call it before any `gh` call and it fires under `-DryRun` too, so a dry run surfaces the same failure. Why: `intel-agency` is an Organization on the enterprise plan, while `nam20485` is free-tier, where private repos get no Actions minutes — a private clone's dispatch workflows could never run.
 
-**`.github/.labels.json`.** The 32-label file is the canonical **dispatch** vocabulary: exactly the labels `src/webhook_receiver/filters.py` and `prompt_builder.py` match on (`orchestration:*`, `implementation:ready|complete`, `gh-issue-tracking:direct-body`, `agent:*`, `state:*`). Stage 4 imports it into every clone because the `intel-agency/agent-context` template ships no labels file, so the pipeline sources it from the launching repo — which is now this one. It is deliberately **not** merged with `.agents/skills/gh-issue-tracking-init/assets/labels.json`: that is a 19-label *planning* vocabulary, 28 labels of one are absent from the other and 15 back the other way, with 3 colour conflicts (`gh-issue-tracking:direct-body`, `epic`, `story`).
+**`.github/.labels.json`.** The 32-label file is the canonical **dispatch** vocabulary: it *contains* the labels `src/webhook_receiver/filters.py` and `prompt_builder.py` match on (`orchestration:*`, `implementation:ready|complete`, `gh-issue-tracking:direct-body`) but is a superset — it also ships GitHub defaults and hierarchy labels matched by nothing in this repo (`agent:*`, `state:*`, `epic`, `story`, `bug`, …). Stage 4 imports it into every clone because the `intel-agency/agent-context` template ships no labels file, so the pipeline sources it from the launching repo — which is now this one. It is deliberately **not** merged with `.agents/skills/gh-issue-tracking-init/assets/labels.json`: that is a 19-label *planning* vocabulary, 28 labels of one are absent from the other and 15 back the other way, with 3 colour conflicts (`gh-issue-tracking:direct-body`, `epic`, `story`).
 
 **Runtime prerequisites** (enforced by the scripts only where noted):
 
 - `gh` authenticated with `repo`, `workflow` and `admin:org` scopes (the latter for secrets/variables).
 - A live SSH agent — `Invoke-GitClone` clones over `git@github.com:`, not HTTPS (setup: [`docs/wsl-ssh-agent-setup-guide.md`](../../docs/wsl-ssh-agent-setup-guide.md)).
-- `GEMINI_API_KEY` present in the environment — `New-RepoSecret` reads the secret body from the env var of that name and throws if it is unset.
+- `GEMINI_API_KEY` present in the environment for real launches — `New-RepoSecret` reads the secret body from the env var of that name and throws if it is unset; under `-DryRun` an unset var only warns.
 - `code-insiders` on PATH, only when `-LaunchEditor` is passed.
 - The `intel-agency/agent-context` template reachable.
 

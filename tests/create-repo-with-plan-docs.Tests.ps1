@@ -78,12 +78,27 @@ Describe 'Get-ClonePath' {
         . $script:FuncFile
     }
 
-    It 'Returns path joining parent and name' {
+    It 'Returns path joining parent and name (DryRun)' {
         $tmpDir = Join-Path ([System.IO.Path]::GetTempPath()) "pester-clone-$(Get-Random)"
         try {
             $result = Get-ClonePath -Parent $tmpDir -Name 'my-repo'
-            $result | Should -BeLike "*my-repo"
-            # Parent dir should have been created
+            $result | Should -BeLike '*my-repo'
+            # -DryRun honours its "without making changes" contract: the
+            # parent must NOT be created (PR #20 review).
+            Test-Path -LiteralPath $tmpDir | Should -BeFalse
+        }
+        finally {
+            if (Test-Path $tmpDir) { Remove-Item $tmpDir -Recurse -Force }
+        }
+    }
+
+    It 'Creates the missing parent and joins the name (non-DryRun)' {
+        $DryRun = $false
+        $tmpDir = Join-Path ([System.IO.Path]::GetTempPath()) "pester-clone-$(Get-Random)"
+        try {
+            $result = Get-ClonePath -Parent $tmpDir -Name 'my-repo'
+            # The non-dry branch resolves the parent, so compare resolved.
+            $result | Should -Be (Join-Path (Resolve-Path -LiteralPath $tmpDir).Path 'my-repo')
             Test-Path -LiteralPath $tmpDir | Should -BeTrue
         }
         finally {
@@ -283,6 +298,21 @@ Describe 'New-RepoSecret' {
     It 'Throws when environment variable is not set' {
         Remove-Item Env:\MISSING_SECRET -ErrorAction SilentlyContinue
         { New-RepoSecret -Owner 'test-org' -RepoName 'test-repo' -SecretName 'MISSING_SECRET' -Confirm:$false } | Should -Throw '*not found*'
+    }
+
+    It 'Warns instead of throwing for an unset variable under DryRun' {
+        # PR #20 review: the env read must not abort a -DryRun launch — no
+        # repo exists yet, so the secret is only previewed.
+        $DryRun = $true
+        Remove-Item Env:\DRYRUN_MISSING_SECRET -ErrorAction SilentlyContinue
+        try {
+            Mock Invoke-External { return @{ ExitCode = 0; Output = @() } }
+            { New-RepoSecret -Owner 'test-org' -RepoName 'test-repo' -SecretName 'DRYRUN_MISSING_SECRET' } | Should -Not -Throw
+            Should -Not -Invoke Invoke-External
+        }
+        finally {
+            $DryRun = $false
+        }
     }
 }
 
@@ -575,17 +605,13 @@ Describe 'Copy-PlanDocs (non-DryRun)' {
 
 Describe 'DryRun integration test' {
     BeforeAll {
-        # Hermeticity: the Create path calls New-RepoSecret -SecretName
-        # 'GEMINI_API_KEY' (scripts/repo-functions.ps1), which reads the value
-        # with [Environment]::GetEnvironmentVariable() and throws
-        # "Environment variable for secret ... not found." *before* the DryRun /
-        # ShouldProcess stub is reached. So a -DryRun walk still needs the
-        # variable to exist — it just never has to be a real key. Supply an
-        # obviously synthetic, non-credential-shaped placeholder so the suite
-        # passes on a runner that does not export GEMINI_API_KEY (CI), and
-        # restore the original in AfterAll.
+        # The Create path calls New-RepoSecret -SecretName 'GEMINI_API_KEY'
+        # (scripts/repo-functions.ps1). A -DryRun launch must survive an
+        # UNSET variable there — the dry-run branch warns instead of throwing
+        # (PR #20 review) — so the suite deliberately removes it for the walk
+        # and restores whatever the runner had afterwards.
         $script:GeminiApiKeyOriginal = $env:GEMINI_API_KEY
-        $env:GEMINI_API_KEY = 'pester-synthetic-not-a-real-key'
+        Remove-Item Env:\GEMINI_API_KEY -ErrorAction SilentlyContinue
     }
 
     AfterAll {
@@ -603,6 +629,8 @@ Describe 'DryRun integration test' {
         $cloneParent = Join-Path ([System.IO.Path]::GetTempPath()) "pester-clones-$(Get-Random)"
         try {
             { & $script:ScriptPath -RepoName 'pester-test' -PlanDocsDir $planDir -CloneParentDir $cloneParent -Visibility 'public' -DryRun -Yes } | Should -Not -Throw
+            $LASTEXITCODE | Should -Be 0 -Because 'the success path owns its exit code (exit 0), never a stale native one'
+            Test-Path -LiteralPath $cloneParent | Should -BeFalse -Because 'a -DryRun launch must make no filesystem changes (PR #20 review)'
         }
         finally {
             if (Test-Path $planDir) { Remove-Item $planDir -Recurse -Force }
@@ -617,6 +645,7 @@ Describe 'DryRun integration test' {
         $cloneParent = Join-Path ([System.IO.Path]::GetTempPath()) "pester-clones-multi-$(Get-Random)"
         try {
             { & $script:ScriptPath -RepoName 'pester-multi' -PlanDocsDir $planDir -CloneParentDir $cloneParent -Visibility 'public' -DryRun -Yes -Count 2 } | Should -Not -Throw
+            Test-Path -LiteralPath $cloneParent | Should -BeFalse -Because 'no clone dirs may be created under -DryRun, even with Count > 1'
         }
         finally {
             if (Test-Path $planDir) { Remove-Item $planDir -Recurse -Force }
