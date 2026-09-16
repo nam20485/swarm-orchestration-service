@@ -173,7 +173,7 @@ function Send-ReplyToReviewComment {
     )
     $ghArgs = @(
         'api', '-X', 'POST',
-        "repos/$Owner/$Repo/pulls/comments/$CommentId/replies",
+        "repos/$Owner/$Repo/pulls/$PR/comments/$CommentId/replies",
         '-f', "body=$Body"
     )
     if ($VerboseLogging) { Write-Host "gh $($ghArgs -join ' ')" -ForegroundColor DarkGray }
