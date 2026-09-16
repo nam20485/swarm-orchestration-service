@@ -288,6 +288,9 @@ foreach ($clonePath in $clonePaths) {
         Push-Location -LiteralPath $clonePath
         try {
             & git add .
+            if ($LASTEXITCODE -ne 0) {
+                throw "git add failed (exit code $LASTEXITCODE) in $clonePath."
+            }
             & git commit --amend --no-edit --message "Seed $repoName from template with plan docs, placeholder replacements, Class-2 cleanup, headless permissions, and stripped model pins"
             if ($LASTEXITCODE -ne 0) {
                 throw "git commit --amend failed (exit code $LASTEXITCODE) in $clonePath."

@@ -203,6 +203,7 @@ try {
         Assert-NoTemplatePlaceholdersRemaining -RepoRoot $resolvedRepoRoot -TemplateText $TemplateRepoName
         Write-Host ' done' -ForegroundColor Green
         Write-Output "SUCCESS: template placeholders replaced and validated in '$resolvedRepoRoot'"
+        if (Get-Command Complete-RunLog -ErrorAction SilentlyContinue) { Complete-RunLog -Status 'SUCCESS' }
         exit 0
     }
 

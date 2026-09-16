@@ -645,6 +645,7 @@ Describe 'DryRun integration test' {
         $cloneParent = Join-Path ([System.IO.Path]::GetTempPath()) "pester-clones-multi-$(Get-Random)"
         try {
             { & $script:ScriptPath -RepoName 'pester-multi' -PlanDocsDir $planDir -CloneParentDir $cloneParent -Visibility 'public' -DryRun -Yes -Count 2 } | Should -Not -Throw
+            $LASTEXITCODE | Should -Be 0 -Because 'the success path owns its exit code (exit 0), never a stale native one'
             Test-Path -LiteralPath $cloneParent | Should -BeFalse -Because 'no clone dirs may be created under -DryRun, even with Count > 1'
         }
         finally {
