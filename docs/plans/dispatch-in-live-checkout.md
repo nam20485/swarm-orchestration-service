@@ -76,6 +76,30 @@ scratch dir cannot work for this dispatch class.
    the skill in the checkout; labels/milestones/Plan/Epic/Stories appear;
    the completion label event arrives back at the receiver (chain closes).
 
+## Dual agent environments (owner decision, 2026-09-16)
+
+Exactly two mutually exclusive environments; chosen at repo init and fixed —
+nothing chooses per dispatch, and modes never mix:
+
+1. **clone** — the launcher's main checkout; no sandbox, no worktree.
+2. **sandbox** — SwarmSandbox-provisioned workspaces.
+
+- Recorded once by the launcher at repo creation in two places so every
+  reader sees the same fact: a GitHub repo variable (e.g.
+  `AGENT_ENVIRONMENT=clone|sandbox`) — the service resolves the workspace
+  per envelope from it (cached; missing/unknown fails closed) — and a line
+  in the repo's AGENTS.md instance section for in-repo readers (the
+  swarm-agent and skills: lived-in checkout vs disposable workspace).
+- Today's host knobs (`ACP_CLONE_ROOT`, `SANDBOX_ENABLED`) remain the
+  boot-time global posture; wiring the per-repo marker as the authority is a
+  small follow-up at the existing `AcpHost.run` seam (variable lookup +
+  cache; the sandbox bridge already exists behind it).
+- The earlier worktree-per-impl idea is **not** a third environment — if it
+  survives at all it is a clone-mode refinement for parallel impl streams
+  (the king swarming inside a lived-in clone), decided separately.
+- Open (owner): the criteria for initializing a repo as sandbox, and the
+  default for new repos.
+
 ## M2 — swarm implementation dispatches
 
 Same mechanism, heavier payloads: `implementation:ready` /
