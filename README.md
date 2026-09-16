@@ -81,6 +81,7 @@ Every knob is an environment variable parsed in
 | `ACP_ENABLED` | `true` | drive opencode over ACP per envelope; `false` keeps the queue-consumer placeholder (no agent sessions) |
 | `ACP_OPENCODE_BIN` | PATH, then `~/.opencode/bin/opencode` | opencode binary location |
 | `ACP_WORKSPACE_ROOT` | `/tmp/swarm-acp-workspaces` | root for per-run session workspaces (the repo itself is never used) |
+| `ACP_CLONE_ROOT` | *(empty)* | when set, the session cwd becomes `<root>/<repo name>` — the launcher-minted checkout of the envelope's repo — instead of a scratch dir; a missing checkout fails the envelope |
 | `ACP_STEP_TIMEOUT` | `30` | seconds per protocol step (initialize, session open) |
 | `ACP_PROMPT_TIMEOUT` | `600` | seconds per prompt (one cold session per envelope) |
 | `ACP_DEFAULT_PERMISSION` | `reject` | action for unclassified permission requests: `reject` (headless-safe) or `allow_once` |
