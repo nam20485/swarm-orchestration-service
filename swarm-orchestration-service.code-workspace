@@ -2,9 +2,6 @@
 	"folders": [
 		{
 			"path": "."
-		},
-		{
-			"path": "../workflow-launch2"
 		}
 	],
 	"settings": {}
