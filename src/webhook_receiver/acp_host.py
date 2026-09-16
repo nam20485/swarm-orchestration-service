@@ -196,9 +196,10 @@ class AcpHost:
 
     Phase 4: when the settings enable it (``SANDBOX_ENABLED``), the session
     cwd is a SwarmSandbox-materialized workspace (bridge ``prepare`` /
-    ``release`` around the session, Decision 5); otherwise the Phase 2 plain
-    scratch dir is kept. A bridge may be injected (tests); without injection
-    one is built from settings when enabled.
+    ``release`` around the session, Decision 5); ``ACP_CLONE_ROOT`` maps the
+    envelope onto an existing checkout of its repo; the default is the
+    Phase 2 plain scratch dir. A bridge may be injected (tests); without
+    injection one is built from settings when enabled.
     """
 
     def __init__(
@@ -349,7 +350,26 @@ class AcpHost:
         )
 
     def _prepare_workspace(self, info: PromptInfo) -> Path:
-        """Fresh scratch cwd for the agent; never the repo itself."""
+        """Session cwd for the agent; never the service's own repo.
+
+        ``ACP_CLONE_ROOT`` maps the envelope's repo onto an existing
+        checkout of it (the launcher-minted clone) — the old-topology
+        behavior where the agent works in the real repo. Missing checkout
+        fails the envelope (no scratch fallback: the direct-body prompt is
+        meaningless outside the repo it targets). Unset → scratch dir.
+        """
+        if self._settings.acp_clone_root:
+            workspace = (
+                Path(self._settings.acp_clone_root).expanduser()
+                / info.repo.rsplit("/", 1)[-1]
+            )
+            if not (workspace / ".git").is_dir():
+                raise AcpHostError(
+                    f"clone checkout not found for delivery {info.delivery_id}: "
+                    f"{workspace} (ACP_CLONE_ROOT set — create/clone the repo, "
+                    "or unset the knob for scratch workspaces)"
+                )
+            return workspace
         root = (
             Path(self._settings.acp_workspace_root)
             if self._settings.acp_workspace_root
@@ -360,12 +380,24 @@ class AcpHost:
         return workspace
 
     def _write_deny_config(self, workspace: Path) -> None:
-        """Belt-and-braces deny-list, applied to every kind of workspace."""
-        if self._settings.acp_denied_tools:
-            config = {
-                "$schema": "https://opencode.ai/config.json",
-                "permission": {tool: "deny" for tool in self._settings.acp_denied_tools},
-            }
-            (workspace / "opencode.json").write_text(
-                json.dumps(config, indent=2), encoding="utf-8"
-            )
+        """Belt-and-braces deny-list, applied to bare workspaces only.
+
+        A lived-in checkout manages its own opencode config (the launcher
+        seeds ``.opencode/`` with the headless permission posture); writing
+        a deny file on top would fight it, so it is skipped.
+        """
+        if not self._settings.acp_denied_tools:
+            return
+        manages_own_config = any(
+            (workspace / name).exists()
+            for name in (".opencode", "opencode.json", "opencode.jsonc")
+        )
+        if manages_own_config:
+            return
+        config = {
+            "$schema": "https://opencode.ai/config.json",
+            "permission": {tool: "deny" for tool in self._settings.acp_denied_tools},
+        }
+        (workspace / "opencode.json").write_text(
+            json.dumps(config, indent=2), encoding="utf-8"
+        )

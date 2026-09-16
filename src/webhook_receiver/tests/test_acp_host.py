@@ -323,6 +323,63 @@ class TestRunHappyPath:
         assert result.stop_reason == "refusal"
 
 
+class TestCloneRootWorkspace:
+    """ACP_CLONE_ROOT: the session cwd is the envelope repo's checkout."""
+
+    def test_session_runs_in_repo_checkout(self, tmp_path, monkeypatch) -> None:
+        clones = tmp_path / "clones"
+        (clones / "repo" / ".git").mkdir(parents=True)
+        cfg = make_settings(tmp_path, acp_clone_root=str(clones))
+        conn, proc, calls = FakeConn(), FakeProc(), []
+        install_spawn(monkeypatch, conn, proc, calls)
+
+        result = asyncio.run(AcpHost(cfg, EventStore()).run(make_info()))
+
+        assert result.workspace == str(clones / "repo")
+        # spawn --cwd and new_session both point at the checkout
+        assert calls[0][2][2] == str(clones / "repo")
+        assert conn.calls[1][1] == str(clones / "repo")
+
+    def test_owner_prefix_stripped_from_repo_name(self, tmp_path, monkeypatch) -> None:
+        clones = tmp_path / "clones"
+        (clones / "repo" / ".git").mkdir(parents=True)
+        cfg = make_settings(tmp_path, acp_clone_root=str(clones))
+        conn, proc, calls = FakeConn(), FakeProc(), []
+        install_spawn(monkeypatch, conn, proc, calls)
+
+        asyncio.run(AcpHost(cfg, EventStore()).run(make_info(repo="intel-agency/repo")))
+
+        assert calls[0][2][2] == str(clones / "repo")
+
+    def test_missing_checkout_fails_closed(self, tmp_path, monkeypatch) -> None:
+        cfg = make_settings(tmp_path, acp_clone_root=str(tmp_path / "clones"))
+        conn, proc, calls = FakeConn(), FakeProc(), []
+        install_spawn(monkeypatch, conn, proc, calls)
+
+        with pytest.raises(AcpHostError, match="clone checkout not found"):
+            asyncio.run(AcpHost(cfg, EventStore()).run(make_info()))
+        # fail-closed pre-session: nothing spawned, no scratch dir created
+        assert calls == []
+        assert not (tmp_path / "ws").exists()
+
+    def test_deny_config_skipped_when_repo_manages_own_config(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        clones = tmp_path / "clones"
+        (clones / "repo" / ".git").mkdir(parents=True)
+        (clones / "repo" / ".opencode").mkdir()
+        cfg = make_settings(
+            tmp_path, acp_clone_root=str(clones), acp_denied_tools=("bash",)
+        )
+        conn, proc, calls = FakeConn(), FakeProc(), []
+        install_spawn(monkeypatch, conn, proc, calls)
+
+        asyncio.run(AcpHost(cfg, EventStore()).run(make_info()))
+
+        # bare-workspace deny file must not fight the checkout's own config
+        assert not (clones / "repo" / "opencode.json").exists()
+
+
 class TestRunFailures:
     def test_prompt_exception_raises_and_emits_failed_finished(
         self, tmp_path, monkeypatch
