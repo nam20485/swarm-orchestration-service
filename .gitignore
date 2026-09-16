@@ -10,6 +10,9 @@ docs/gpg-non-interactive-signing.md
 # Test result artifacts
 testResults.xml
 
+# Launcher run logs (scripts/logging.ps1 Start-RunLog: one timestamped JSONL per run)
+logs/
+
 # Scratch / temporary issue-body files
 scripts/tmp-*.txt
 
