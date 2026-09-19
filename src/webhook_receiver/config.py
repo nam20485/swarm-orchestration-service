@@ -55,7 +55,7 @@ class Settings:
     # When set, the session cwd becomes <root>/<repo name> — an existing
     # checkout of the envelope's repo (the launcher-minted clone), instead of
     # a scratch dir. Missing checkout fails the envelope (no fallback); a
-    # checkout that manages its own opencode config gets no deny file.
+    # checkout — seeded config or not — never gets a deny file.
     acp_clone_root: str = ""
     acp_step_timeout: float = 30.0  # per protocol step (initialize, new_session)
     acp_prompt_timeout: float = 600.0  # per prompt (one cold session per envelope)

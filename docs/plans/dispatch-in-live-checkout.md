@@ -41,7 +41,8 @@ scratch dir cannot work for this dispatch class.
 
 1. **This PR** (`dev/acp-clone-workspace`): `ACP_CLONE_ROOT` seam — session
    cwd = `<root>/<repo name>` (fail-closed if missing; deny-config skipped
-   when the checkout manages its own `.opencode/`); compose pins
+   outright — a lived-in checkout is never written into, seeded config or
+   not; the runtime permission policy is the backstop); compose pins
    `ACP_ENABLED=false`; docs/env surface synced; tests.
 2. **swarm-agent seeding** (follow-up, launcher scripts in this repo):
    seed `.opencode/agents/swarm-agent.md` into clones and switch
