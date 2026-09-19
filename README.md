@@ -81,12 +81,13 @@ Every knob is an environment variable parsed in
 | `ACP_ENABLED` | `true` | drive opencode over ACP per envelope; `false` keeps the queue-consumer placeholder (no agent sessions) |
 | `ACP_OPENCODE_BIN` | PATH, then `~/.opencode/bin/opencode` | opencode binary location |
 | `ACP_WORKSPACE_ROOT` | `/tmp/swarm-acp-workspaces` | root for per-run session workspaces (the repo itself is never used) |
+| `ACP_CLONE_ROOT` | *(empty)* | when set, the session cwd becomes `<root>/<repo name>` — the launcher-minted checkout of the envelope's repo — instead of a scratch dir; a missing checkout fails the envelope; mutually exclusive with `SANDBOX_ENABLED` (the host refuses to start with both) |
 | `ACP_STEP_TIMEOUT` | `30` | seconds per protocol step (initialize, session open) |
 | `ACP_PROMPT_TIMEOUT` | `600` | seconds per prompt (one cold session per envelope) |
 | `ACP_DEFAULT_PERMISSION` | `reject` | action for unclassified permission requests: `reject` (headless-safe) or `allow_once` |
 | `ACP_DENY_PATTERNS` | *(empty)* | comma-separated regexes (case-insensitive) that always reject a permission request; validated at boot |
-| `ACP_DENIED_TOOLS` | *(empty)* | tools denied pre-prompt via the workspace `opencode.json` permission config |
-| `SANDBOX_ENABLED` | `false` | provision session workspaces through the SwarmSandbox API |
+| `ACP_DENIED_TOOLS` | *(empty)* | tools denied pre-prompt via the workspace `opencode.json` permission config (bare workspaces only — never written into an `ACP_CLONE_ROOT` checkout) |
+| `SANDBOX_ENABLED` | `false` | provision session workspaces through the SwarmSandbox API; mutually exclusive with `ACP_CLONE_ROOT` |
 | `SANDBOX_API_URL` | *(required when enabled)* | SwarmSandbox API base URL; validated at boot |
 | `SANDBOX_BRANCH` | `development` | branch the sandbox clones into the workspace |
 | `SANDBOX_READY_TIMEOUT` | `300` | seconds to wait for the workspace to materialize host-side |

@@ -21,6 +21,10 @@ services:
       - "8080"
     environment:
       - OS_WEBHOOK_SECRET=${OS_WEBHOOK_SECRET:?OS_WEBHOOK_SECRET is required}
+      # The image has no opencode, so the consumer must keep the Phase 1
+      # mark-consumed placeholder instead of attempting (and failing) ACP
+      # sessions per envelope. Host runs set ACP_ENABLED=true for dispatch.
+      - ACP_ENABLED=${ACP_ENABLED:-false}
       - WEBHOOK_HOST=0.0.0.0
       - WEBHOOK_PORT=8080
       - WEBHOOK_LOG_LEVEL=${WEBHOOK_LOG_LEVEL:-info}

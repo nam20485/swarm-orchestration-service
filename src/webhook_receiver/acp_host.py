@@ -11,8 +11,9 @@ is deliberately not a plugin system (Simplicity First).
 
 **Model/agent config is never pinned host-side** (plan §5 Decision 10):
 model, tools, and MCP servers come from opencode's own config (global +
-the workspace ``opencode.json`` written here, which only carries the
-fail-closed ``permission`` deny-list from ``Settings.acp_denied_tools``).
+the workspace ``opencode.json`` written here for bare workspaces only —
+never a lived-in checkout — carrying the fail-closed ``permission``
+deny-list from ``Settings.acp_denied_tools``).
 
 **EventStore contract (plan §5 Decision 7 — protocol events only; stable
 names; every event carries ``run_id`` = the PromptInfo id):**
@@ -196,9 +197,14 @@ class AcpHost:
 
     Phase 4: when the settings enable it (``SANDBOX_ENABLED``), the session
     cwd is a SwarmSandbox-materialized workspace (bridge ``prepare`` /
-    ``release`` around the session, Decision 5); otherwise the Phase 2 plain
-    scratch dir is kept. A bridge may be injected (tests); without injection
-    one is built from settings when enabled.
+    ``release`` around the session, Decision 5); ``ACP_CLONE_ROOT`` maps the
+    envelope onto an existing checkout of its repo; the default is the
+    Phase 2 plain scratch dir. The two environment knobs are mutually
+    exclusive (dual agent environments,
+    ``docs/plans/dispatch-in-live-checkout.md``) — setting both fails at
+    construction instead of letting the bridge silently shadow the clone.
+    A bridge may be injected (tests); without injection one is built from
+    settings when enabled.
     """
 
     def __init__(
@@ -207,6 +213,12 @@ class AcpHost:
         store: EventStore,
         bridge: SandboxBridge | None = None,
     ) -> None:
+        if settings.sandbox_enabled and settings.acp_clone_root:
+            raise AcpHostError(
+                "SANDBOX_ENABLED and ACP_CLONE_ROOT are mutually exclusive "
+                "(dual agent environments, docs/plans/dispatch-in-live-checkout.md): "
+                "the sandbox bridge would silently shadow the clone checkout"
+            )
         self._settings = settings
         self._store = store
         self._bridge = (
@@ -349,7 +361,27 @@ class AcpHost:
         )
 
     def _prepare_workspace(self, info: PromptInfo) -> Path:
-        """Fresh scratch cwd for the agent; never the repo itself."""
+        """Session cwd for the agent; never the service's own repo.
+
+        ``ACP_CLONE_ROOT`` maps the envelope's repo onto an existing
+        checkout of it (the launcher-minted clone) — the old-topology
+        behavior where the agent works in the real repo. Missing checkout
+        fails the envelope (no scratch fallback: the direct-body prompt is
+        meaningless outside the repo it targets). Unset → scratch dir.
+        """
+        if self._settings.acp_clone_root:
+            workspace = (
+                Path(self._settings.acp_clone_root).expanduser()
+                / info.repo.rsplit("/", 1)[-1]
+            )
+            # A worktree's .git is a file (gitdir: pointer), not a dir.
+            if not (workspace / ".git").exists():
+                raise AcpHostError(
+                    f"clone checkout not found for delivery {info.delivery_id}: "
+                    f"{workspace} (ACP_CLONE_ROOT set — create/clone the repo, "
+                    "or unset the knob for scratch workspaces)"
+                )
+            return workspace
         root = (
             Path(self._settings.acp_workspace_root)
             if self._settings.acp_workspace_root
@@ -360,12 +392,31 @@ class AcpHost:
         return workspace
 
     def _write_deny_config(self, workspace: Path) -> None:
-        """Belt-and-braces deny-list, applied to every kind of workspace."""
-        if self._settings.acp_denied_tools:
-            config = {
-                "$schema": "https://opencode.ai/config.json",
-                "permission": {tool: "deny" for tool in self._settings.acp_denied_tools},
-            }
-            (workspace / "opencode.json").write_text(
-                json.dumps(config, indent=2), encoding="utf-8"
-            )
+        """Belt-and-braces deny-list, applied to bare workspaces only.
+
+        A lived-in checkout is never written into: ``ACP_CLONE_ROOT``
+        workspaces are skipped outright (an untracked ``opencode.json``
+        would dirty the checkout's git status; the guarantee there is the
+        checkout's own permission posture — launcher-seeded config, else
+        the runtime policy's ``ACP_DEFAULT_PERMISSION``). Any workspace
+        already managing an opencode config (e.g. a sandbox workspace
+        materialized from a repo that ships one) is skipped too, so the
+        file never fights it.
+        """
+        if not self._settings.acp_denied_tools:
+            return
+        if self._settings.acp_clone_root:
+            return  # lived-in checkout: the host never mutates it
+        manages_own_config = any(
+            (workspace / name).exists()
+            for name in (".opencode", "opencode.json", "opencode.jsonc")
+        )
+        if manages_own_config:
+            return
+        config = {
+            "$schema": "https://opencode.ai/config.json",
+            "permission": {tool: "deny" for tool in self._settings.acp_denied_tools},
+        }
+        (workspace / "opencode.json").write_text(
+            json.dumps(config, indent=2), encoding="utf-8"
+        )
