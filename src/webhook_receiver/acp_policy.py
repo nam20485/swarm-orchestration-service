@@ -20,7 +20,8 @@ and fails closed: if the agent offers no option of the wanted family, the
 request is dismissed (``DeniedOutcome(cancelled)``), which opencode treats
 as a denial (spike: tool → ``failed``, no hang). Belt-and-braces layer:
 ``Settings.acp_denied_tools`` is written into the workspace ``opencode.json``
-so opencode removes those tools pre-prompt entirely (see
+so opencode removes those tools pre-prompt entirely (bare workspaces only —
+``ACP_CLONE_ROOT`` checkouts are never written into; see
 ``webhook_receiver.acp_host``).
 """
 
