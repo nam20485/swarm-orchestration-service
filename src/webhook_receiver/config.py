@@ -52,6 +52,11 @@ class Settings:
     # Empty → <system tmpdir>/swarm-acp-workspaces/<envelope id>. The repo
     # itself is never used as the agent cwd (spike convention).
     acp_workspace_root: str = ""
+    # When set, the session cwd becomes <root>/<repo name> — an existing
+    # checkout of the envelope's repo (the launcher-minted clone), instead of
+    # a scratch dir. Missing checkout fails the envelope (no fallback); a
+    # checkout — seeded config or not — never gets a deny file.
+    acp_clone_root: str = ""
     acp_step_timeout: float = 30.0  # per protocol step (initialize, new_session)
     acp_prompt_timeout: float = 600.0  # per prompt (one cold session per envelope)
     # Unclassified permission requests: "reject" (default, headless-safe) or
@@ -128,6 +133,7 @@ class Settings:
             acp_enabled=_env_bool("ACP_ENABLED", True),
             acp_opencode_bin=os.environ.get("ACP_OPENCODE_BIN", "").strip(),
             acp_workspace_root=os.environ.get("ACP_WORKSPACE_ROOT", "").strip(),
+            acp_clone_root=os.environ.get("ACP_CLONE_ROOT", "").strip(),
             acp_step_timeout=float(os.environ.get("ACP_STEP_TIMEOUT", "30")),
             acp_prompt_timeout=float(os.environ.get("ACP_PROMPT_TIMEOUT", "600")),
             acp_default_permission=default_permission,
