@@ -116,6 +116,15 @@ class Settings:
             raise ValueError(
                 "SANDBOX_API_URL is required when SANDBOX_ENABLED is true."
             )
+        acp_clone_root = os.environ.get("ACP_CLONE_ROOT", "").strip()
+        # Dual agent environments never mix — validated at boot so a
+        # misconfiguration surfaces even with ACP_ENABLED=false (where the
+        # host, and its construction-time check, is never built).
+        if sandbox_enabled and acp_clone_root:
+            raise ValueError(
+                "SANDBOX_ENABLED and ACP_CLONE_ROOT are mutually exclusive "
+                "(dual agent environments never mix)."
+            )
 
         events_keepalive = float(os.environ.get("WEBHOOK_EVENTS_KEEPALIVE", "15"))
         if events_keepalive <= 0:
@@ -133,7 +142,7 @@ class Settings:
             acp_enabled=_env_bool("ACP_ENABLED", True),
             acp_opencode_bin=os.environ.get("ACP_OPENCODE_BIN", "").strip(),
             acp_workspace_root=os.environ.get("ACP_WORKSPACE_ROOT", "").strip(),
-            acp_clone_root=os.environ.get("ACP_CLONE_ROOT", "").strip(),
+            acp_clone_root=acp_clone_root,
             acp_step_timeout=float(os.environ.get("ACP_STEP_TIMEOUT", "30")),
             acp_prompt_timeout=float(os.environ.get("ACP_PROMPT_TIMEOUT", "600")),
             acp_default_permission=default_permission,

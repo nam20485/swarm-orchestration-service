@@ -47,6 +47,7 @@ import json
 import logging
 import re
 import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -203,8 +204,9 @@ class AcpHost:
     exclusive (dual agent environments,
     ``docs/plans/dispatch-in-live-checkout.md``) — setting both fails at
     construction instead of letting the bridge silently shadow the clone.
-    A bridge may be injected (tests); without injection one is built from
-    settings when enabled.
+    A bridge may be injected (tests); injection counts as the sandbox
+    environment too, so it fails with ``ACP_CLONE_ROOT`` just the same.
+    Without injection one is built from settings when enabled.
     """
 
     def __init__(
@@ -213,9 +215,10 @@ class AcpHost:
         store: EventStore,
         bridge: SandboxBridge | None = None,
     ) -> None:
-        if settings.sandbox_enabled and settings.acp_clone_root:
+        if settings.acp_clone_root and (settings.sandbox_enabled or bridge is not None):
             raise AcpHostError(
-                "SANDBOX_ENABLED and ACP_CLONE_ROOT are mutually exclusive "
+                "SANDBOX_ENABLED (or an injected sandbox bridge) and "
+                "ACP_CLONE_ROOT are mutually exclusive "
                 "(dual agent environments, docs/plans/dispatch-in-live-checkout.md): "
                 "the sandbox bridge would silently shadow the clone checkout"
             )
@@ -245,7 +248,7 @@ class AcpHost:
             workspace = sandbox.path
         else:
             workspace = self._prepare_workspace(info)
-        self._write_deny_config(workspace)
+        self._write_deny_config(workspace, delivery_id=info.delivery_id)
         client = HostClient(self._settings, self._store, run_id=info.id)
         step = self._settings.acp_step_timeout
         prompt_timeout = self._settings.acp_prompt_timeout
@@ -361,19 +364,29 @@ class AcpHost:
         )
 
     def _prepare_workspace(self, info: PromptInfo) -> Path:
-        """Session cwd for the agent; never the service's own repo.
+        """Session cwd for the agent; a scratch dir is never the service's
+        own repo — ``ACP_CLONE_ROOT`` deliberately maps onto the launcher's
+        real checkout of the envelope's repo instead.
 
         ``ACP_CLONE_ROOT`` maps the envelope's repo onto an existing
         checkout of it (the launcher-minted clone) — the old-topology
-        behavior where the agent works in the real repo. Missing checkout
+        behavior where the agent works in the real repo. The checkout is
+        resolved by repo *name* under the root, then verified against the
+        envelope: the name segment must be a plain path component (never
+        ``.``/``..``), and the checkout's ``origin`` must point at the
+        envelope's repo, so a same-named checkout of a different owner's
+        repo never receives the session. Missing checkout or a mismatch
         fails the envelope (no scratch fallback: the direct-body prompt is
         meaningless outside the repo it targets). Unset → scratch dir.
         """
         if self._settings.acp_clone_root:
-            workspace = (
-                Path(self._settings.acp_clone_root).expanduser()
-                / info.repo.rsplit("/", 1)[-1]
-            )
+            name = info.repo.rsplit("/", 1)[-1]
+            if name in (".", "..") or not re.fullmatch(r"[A-Za-z0-9._-]+", name):
+                raise AcpHostError(
+                    f"invalid repo name for clone-root resolution, delivery "
+                    f"{info.delivery_id}: {info.repo!r}"
+                )
+            workspace = Path(self._settings.acp_clone_root).expanduser() / name
             # A worktree's .git is a file (gitdir: pointer), not a dir.
             if not (workspace / ".git").exists():
                 raise AcpHostError(
@@ -381,9 +394,15 @@ class AcpHost:
                     f"{workspace} (ACP_CLONE_ROOT set — create/clone the repo, "
                     "or unset the knob for scratch workspaces)"
                 )
+            if not self._checkout_is_repo(workspace, info.repo):
+                raise AcpHostError(
+                    f"clone checkout identity mismatch for delivery "
+                    f"{info.delivery_id}: {workspace} is not a checkout of "
+                    f"{info.repo}"
+                )
             return workspace
         root = (
-            Path(self._settings.acp_workspace_root)
+            Path(self._settings.acp_workspace_root).expanduser()
             if self._settings.acp_workspace_root
             else Path("/tmp") / "swarm-acp-workspaces"
         )
@@ -391,7 +410,28 @@ class AcpHost:
         workspace.mkdir(parents=True, exist_ok=True)
         return workspace
 
-    def _write_deny_config(self, workspace: Path) -> None:
+    @staticmethod
+    def _checkout_is_repo(workspace: Path, repo: str) -> bool:
+        """True when the checkout's ``origin`` points at ``owner/repo``.
+
+        Accepts the ssh (``git@host:owner/repo.git``) and https
+        (``https://host/owner/repo.git[/]``) URL forms; anything unreadable
+        or pointing elsewhere is a mismatch (fail closed).
+        """
+        try:
+            res = subprocess.run(
+                ["git", "-C", str(workspace), "remote", "get-url", "origin"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=True,
+            )
+        except Exception:
+            return False
+        match = re.search(r"[:/]([^/:]+/[^/]+?)(?:\.git)?/?$", res.stdout.strip())
+        return bool(match) and match.group(1).lower() == repo.lower()
+
+    def _write_deny_config(self, workspace: Path, delivery_id: str) -> None:
         """Belt-and-braces deny-list, applied to bare workspaces only.
 
         A lived-in checkout is never written into: ``ACP_CLONE_ROOT``
@@ -401,17 +441,30 @@ class AcpHost:
         the runtime policy's ``ACP_DEFAULT_PERMISSION``). Any workspace
         already managing an opencode config (e.g. a sandbox workspace
         materialized from a repo that ships one) is skipped too, so the
-        file never fights it.
+        file never fights it. Both skips leave ``ACP_DENIED_TOOLS``
+        unenforced at the config layer — say so, since the runtime policy
+        never consults that knob.
         """
         if not self._settings.acp_denied_tools:
             return
         if self._settings.acp_clone_root:
+            logger.warning(
+                "ACP_DENIED_TOOLS not applied for delivery %s: clone-root "
+                "checkout is never written into (runtime permission policy "
+                "is the enforcement there)",
+                delivery_id,
+            )
             return  # lived-in checkout: the host never mutates it
         manages_own_config = any(
             (workspace / name).exists()
             for name in (".opencode", "opencode.json", "opencode.jsonc")
         )
         if manages_own_config:
+            logger.warning(
+                "ACP_DENIED_TOOLS not applied for delivery %s: workspace "
+                "manages its own opencode config",
+                delivery_id,
+            )
             return
         config = {
             "$schema": "https://opencode.ai/config.json",

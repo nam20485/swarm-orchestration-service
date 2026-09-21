@@ -28,6 +28,7 @@ class TestFromEnv:
             "ACP_ENABLED",
             "ACP_OPENCODE_BIN",
             "ACP_WORKSPACE_ROOT",
+            "ACP_CLONE_ROOT",
             "ACP_STEP_TIMEOUT",
             "ACP_PROMPT_TIMEOUT",
             "ACP_DEFAULT_PERMISSION",
@@ -47,6 +48,7 @@ class TestFromEnv:
         assert cfg.acp_enabled is True
         assert cfg.acp_opencode_bin == ""
         assert cfg.acp_workspace_root == ""
+        assert cfg.acp_clone_root == ""
         assert cfg.acp_step_timeout == 30.0
         assert cfg.acp_prompt_timeout == 600.0
         assert cfg.acp_default_permission == "reject"
@@ -93,6 +95,7 @@ class TestAcpFromEnv:
         monkeypatch.setenv("OS_WEBHOOK_SECRET", self.SECRET)
         monkeypatch.setenv("ACP_OPENCODE_BIN", "/usr/local/bin/opencode")
         monkeypatch.setenv("ACP_WORKSPACE_ROOT", "/tmp/ws")
+        monkeypatch.setenv("ACP_CLONE_ROOT", "~/src/github/nam20485/dynamic_workflows")
         monkeypatch.setenv("ACP_STEP_TIMEOUT", "5.5")
         monkeypatch.setenv("ACP_PROMPT_TIMEOUT", "120")
         monkeypatch.setenv("ACP_DEFAULT_PERMISSION", "allow_once")
@@ -101,6 +104,7 @@ class TestAcpFromEnv:
         cfg = Settings.from_env()
         assert cfg.acp_opencode_bin == "/usr/local/bin/opencode"
         assert cfg.acp_workspace_root == "/tmp/ws"
+        assert cfg.acp_clone_root == "~/src/github/nam20485/dynamic_workflows"
         assert cfg.acp_step_timeout == 5.5
         assert cfg.acp_prompt_timeout == 120.0
         assert cfg.acp_default_permission == "allow_once"
@@ -122,6 +126,26 @@ class TestAcpFromEnv:
         monkeypatch.setenv("ACP_DENY_PATTERNS", "([unclosed")
         with pytest.raises(ValueError, match="not a valid regex"):
             Settings.from_env()
+
+    def test_clone_root_and_sandbox_exclusive_at_boot(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Dual agent environments never mix — from_env refuses the combo even
+        # with ACP_ENABLED=false, where the host (and its construction-time
+        # check) would never be built.
+        monkeypatch.setenv("OS_WEBHOOK_SECRET", self.SECRET)
+        monkeypatch.setenv("SANDBOX_ENABLED", "true")
+        monkeypatch.setenv("SANDBOX_API_URL", "http://sandbox.test")
+        monkeypatch.setenv("ACP_CLONE_ROOT", "~/clones")
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            Settings.from_env()
+        monkeypatch.setenv("ACP_ENABLED", "false")
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            Settings.from_env()
+        # Clone root alone is fine.
+        monkeypatch.delenv("SANDBOX_ENABLED", raising=False)
+        monkeypatch.delenv("SANDBOX_API_URL", raising=False)
+        assert Settings.from_env().acp_clone_root == "~/clones"
 
     def test_dataclass_defaults_keep_direct_construction_working(self) -> None:
         # Phase 1 call sites construct Settings with the listener fields only;
