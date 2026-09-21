@@ -174,15 +174,6 @@ $loggingModule = Join-Path $PSScriptRoot 'logging.ps1'
 if (Test-Path -LiteralPath $loggingModule) { . $loggingModule } else { Write-Verbose 'logging.ps1 not found; proceeding without structured logging' }
 Write-Host ' done' -ForegroundColor DarkGray
 
-# Owner/visibility policy — Create set only, since ReplaceOnly has no -Visibility.
-# intel-agency is an Enterprise-plan Organization, so only its private repos get
-# Cloud Actions minutes; a free-tier User's private clone gets none and its
-# dispatch workflows could never run. Checked here, before any gh call, so it
-# bails under -DryRun too.
-if ($PSCmdlet.ParameterSetName -eq 'Create' -and -not (Test-OwnerVisibilityPolicy -Owner $Owner -Visibility $Visibility)) {
-    throw ("Invalid owner/visibility combination: '{0}/{1}'. Private repos are only supported under the 'intel-agency' owner (Enterprise Cloud Actions minutes); free-tier private repos get no Actions minutes, so the clone's dispatch workflows could never run. Use -Owner intel-agency, or -Visibility public." -f $Owner, $Visibility)
-}
-
 $docsDir = 'plan_docs'
 
 #
@@ -194,6 +185,16 @@ try {
     if (Get-Command Start-RunLog -ErrorAction SilentlyContinue) {
         $logPath = Start-RunLog -RunName 'create-repo'
         Write-Verbose "Run log: $logPath"
+    }
+
+    # Owner/visibility policy — Create set only, since ReplaceOnly has no -Visibility.
+    # intel-agency is an Enterprise-plan Organization, so only its private repos get
+    # Cloud Actions minutes; a free-tier User's private clone gets none and its
+    # dispatch workflows could never run. Checked before any gh call (and under
+    # -DryRun too), INSIDE the try so the catch's FAILED/exit-1 contract applies
+    # to this failure like every other.
+    if ($PSCmdlet.ParameterSetName -eq 'Create' -and -not (Test-OwnerVisibilityPolicy -Owner $Owner -Visibility $Visibility)) {
+        throw ("Invalid owner/visibility combination: '{0}/{1}'. Private repos are only supported under the 'intel-agency' owner (Enterprise Cloud Actions minutes); free-tier private repos get no Actions minutes, so the clone's dispatch workflows could never run. Use -Owner intel-agency, or -Visibility public." -f $Owner, $Visibility)
     }
 
     if ($PSCmdlet.ParameterSetName -eq 'ReplaceOnly') {
@@ -307,17 +308,10 @@ try {
 
         # Copy plan docs
         Write-Host 'Copying plan docs...' -ForegroundColor Cyan -NoNewline
-        Copy-PlanDocs -SourceDir $PlanDocsDir -RepoRoot $clonePath
+        Copy-PlanDocs -SourceDir $PlanDocsDir -RepoRoot $clonePath -DocsSubDir $docsDir
         Write-Host ' done' -ForegroundColor Green
         if (Get-Command Write-RunLog -ErrorAction SilentlyContinue) { Write-RunLog -Level 'INFO' -Step 'copy-docs' -Message 'Copied plan docs' -Data @{ sourceDir = $PlanDocsDir; repoRoot = $clonePath } }
 
-        # Snapshot file list before replacement. A -DryRun launch creates no
-        # clone directory, so there may be no tree to enumerate.
-        $preFiles = @()
-        if (Test-Path -LiteralPath $clonePath) {
-            $preFiles = @(Get-ChildItem -LiteralPath $clonePath -Recurse -Force -File | Where-Object { $_.FullName -notmatch '[/\\]\.git([/\\]|$)' })
-        }
-        Write-Verbose "[TRACE:Main] Pre-replacement file count: $($preFiles.Count)"
         Write-Verbose "[TRACE:Main] Clone path: $clonePath"
         Write-Verbose "[TRACE:Main] Clone path exists: $(Test-Path -LiteralPath $clonePath)"
         Write-Verbose "[TRACE:Main] TEMPLATE_REPO_NAME: '$TemplateRepoName'"
@@ -436,7 +430,10 @@ try {
                 $amendMsg = ($amendCommit.Output -join ' ')
                 if ($amendMsg -notmatch 'nothing to commit') { throw "git commit --amend failed: $amendMsg" }
             }
-            Invoke-External -FilePath 'git' -ArgumentList @('-C', $clonePath, 'push', '--force-with-lease', 'origin', 'main') | Out-Null
+            # Push the current branch: the initial push and the rebase both
+            # target the detected branch, which for the agent-context template
+            # is development — a fresh clone has no local main to push.
+            Invoke-External -FilePath 'git' -ArgumentList @('-C', $clonePath, 'push', '--force-with-lease', 'origin', 'HEAD') | Out-Null
             Write-Host ' done' -ForegroundColor Green
         }
         else {
@@ -452,14 +449,26 @@ try {
         if (Get-Command Write-RunLog -ErrorAction SilentlyContinue) { Write-RunLog -Level 'INFO' -Step 'repo-done' -Message "Repo complete: $repoName" -Data @{ clonePath = $clonePath } }
     }
 
-    if (-not $Yes) {
-        $launch = Read-Host 'Launch editor? (y/N)'
-        if ( ($launch ?? '').Trim().ToLower() -eq 'y' -or $LaunchEditor ) {
-            code-insiders --profile $EditorProfile $lastEditorTarget
+    # Editor launch: skipped under -DryRun (no repos were created, and the
+    # prompt/launch must not fire), and gated on the binary existing — a
+    # missing code-insiders on a headless host must not turn a fully
+    # completed pipeline into an exit-1 failure past this point.
+    if ($DryRun) {
+        Write-Verbose '[dry-run] Skipping editor launch (no repos were created)'
+    }
+    elseif (Get-Command 'code-insiders' -ErrorAction SilentlyContinue) {
+        if (-not $Yes) {
+            $launch = Read-Host 'Launch editor? (y/N)'
+            if ( ($launch ?? '').Trim().ToLower() -eq 'y' -or $LaunchEditor ) {
+                code-insiders --profile $EditorProfile $lastEditorTarget
+            }
+        }
+        else {
+            if ($LaunchEditor -and $lastEditorTarget) { code-insiders --profile $EditorProfile $lastEditorTarget }
         }
     }
     else {
-        if ($LaunchEditor -and $lastEditorTarget) { code-insiders --profile $EditorProfile $lastEditorTarget }
+        Write-Verbose 'code-insiders not found on PATH; skipping editor launch'
     }
 
     Write-Host '=== All done ===' -ForegroundColor Green

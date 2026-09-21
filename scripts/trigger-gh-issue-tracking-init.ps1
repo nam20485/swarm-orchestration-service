@@ -66,7 +66,7 @@
 .NOTES
     Stage 5 of the agent-context launch pipeline. Originally the W1.5
     replacement for the legacy hierarchy-init trigger in the launcher repo.
-    See docs/plans/fold-workflow-launch2-into-service.md.
+    See docs/plans/completed/fold-workflow-launch2-into-service.md.
 #>
 
 [CmdletBinding()]
@@ -147,5 +147,11 @@ if ($Labels -and $Labels.Count -gt 0) {
 if ($DryRun) { $dispatchParams['DryRun'] = $true }
 
 & $createDispatch @dispatchParams
+# The child signals failure by exiting non-zero; without this check the
+# failure is only detected when $ErrorActionPreference happens to promote
+# its Write-Error — the script would still print 'trigger complete'.
+if ($LASTEXITCODE -ne 0) {
+    throw "create-dispatch-issue.ps1 failed (exit code $LASTEXITCODE) on $Repo."
+}
 
 Write-Host '=== trigger complete ===' -ForegroundColor Green

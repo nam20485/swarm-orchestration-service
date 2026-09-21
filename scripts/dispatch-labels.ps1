@@ -58,7 +58,10 @@ function Ensure-DispatchBootstrapLabel {
     }
 
     $checkResult = & gh api "repos/$TargetRepo/labels/$encodedLabelName" 2>&1
-    if ($LASTEXITCODE -eq 0 -and $checkResult -notmatch '"message"') {
+    # Exit code alone is the reliable discriminator: sniffing the body for
+    # '"message"' misclassifies a found label whose description happens to
+    # contain that word, and the follow-up POST would then 422 on re-runs.
+    if ($LASTEXITCODE -eq 0) {
         Write-Verbose "Bootstrap label '$LabelName' already exists on '$TargetRepo'."
         return
     }

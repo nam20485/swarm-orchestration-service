@@ -225,6 +225,13 @@ foreach ($cfgPath in @($jsoncPath, $jsonPath)) {
             if ($trimmed.EndsWith(',')) {
                 $out[$lastKeptIdx] = $trimmed.Substring(0, $trimmed.Length - 1)
             }
+            elseif ($trimmed -match '^(.*),(\s*//[^"]*)$') {
+                # Dangling comma ahead of a trailing line comment:
+                # `"key": v, // note` — drop just the comma. The comment
+                # tail must be quote-free so a `//` inside a string value
+                # is never mistaken for a comment.
+                $out[$lastKeptIdx] = "$($Matches[1])$($Matches[2])"
+            }
         }
 
         $out.Add($line)

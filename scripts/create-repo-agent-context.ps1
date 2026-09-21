@@ -93,7 +93,7 @@
 
 .NOTES
     Imported from the workflow-launch2 launcher; it predates the fold.
-    See docs/plans/fold-workflow-launch2-into-service.md.
+    See docs/plans/completed/fold-workflow-launch2-into-service.md.
 #>
 
 [CmdletBinding()]
@@ -278,11 +278,14 @@ foreach ($clonePath in $clonePaths) {
     Write-Host ' done' -ForegroundColor Green
 
     # Amend the seed commit to include the cleanup + permission + model changes,
-    # then force-push it back over main: stage 1 already pushed the pre-cleanup
-    # seed commit, so an amend that stays local would leave origin/main shipping
-    # the template's ask-permissions and model pins — exactly what steps 3/3.5
-    # exist to strip. --force-with-lease is safe because the clone is ours alone
-    # since that push; stage 1's own post-rebase amend uses the same pattern.
+    # then force-push it back over the branch stage 1 pushed: `gh repo create
+    # --template` copies only the template's default branch (development for
+    # agent-context — there is no main), stage 1 pushed and rebased that same
+    # detected branch, and an amend that stays local (or lands on the wrong
+    # branch) would leave origin shipping the template's ask-permissions and
+    # model pins — exactly what steps 3/3.5 exist to strip. --force-with-lease
+    # is safe because the clone is ours alone since that push; stage 1's own
+    # post-rebase amend uses the same pattern.
     if (-not $DryRun) {
         Write-Host 'Amending seed commit with cleanup + permissions + stripped models...' -ForegroundColor Cyan -NoNewline
         Push-Location -LiteralPath $clonePath
@@ -295,9 +298,9 @@ foreach ($clonePath in $clonePaths) {
             if ($LASTEXITCODE -ne 0) {
                 throw "git commit --amend failed (exit code $LASTEXITCODE) in $clonePath."
             }
-            & git push --force-with-lease origin HEAD:main
+            & git push --force-with-lease origin HEAD
             if ($LASTEXITCODE -ne 0) {
-                throw "git push --force-with-lease failed (exit code $LASTEXITCODE) in $clonePath — the amended seed commit did not reach origin/main."
+                throw "git push --force-with-lease failed (exit code $LASTEXITCODE) in $clonePath — the amended seed commit did not reach the branch stage 1 pushed."
             }
         }
         finally {
@@ -337,6 +340,9 @@ foreach ($clonePath in $clonePaths) {
         }
         if ($DryRun) { $triggerParams['DryRun'] = $true }
         & $triggerScript @triggerParams
+        if ($LASTEXITCODE -ne 0) {
+            throw "trigger-gh-issue-tracking-init.ps1 failed (exit code $LASTEXITCODE) on $repoFullName."
+        }
         Write-Host ' done' -ForegroundColor Green
     }
     else {

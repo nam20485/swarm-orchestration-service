@@ -72,18 +72,35 @@ function Invoke-External
     param(
         [Parameter(Mandatory)][string]$FilePath,
         [Parameter()][string[]]$ArgumentList = @(),
-        [switch]$AllowFail
+        [switch]$AllowFail,
+        # Optional stdin payload (e.g. `gh secret set` without --body, so the
+        # value never appears in the child process's argv).
+        [Parameter()][string]$InputText,
+        # Argument values to replace with '<redacted>' in the verbose line
+        # and in the failure message (e.g. secret bodies).
+        [Parameter()][string[]]$RedactValues = @()
     )
-    $cmd = "$FilePath $($ArgumentList -join ' ')"
+    $displayArgs = foreach ($arg in $ArgumentList)
+    {
+        if ($RedactValues -contains $arg) { '<redacted>' } else { $arg }
+    }
+    $cmd = "$FilePath $($displayArgs -join ' ')"
     Write-Verbose ">> $cmd"
     if ($DryRun) { return @{ ExitCode = 0; Output = @('<dry-run>') } }
-    $out = & $FilePath @ArgumentList 2>&1
+    $out = if ($PSBoundParameters.ContainsKey('InputText'))
+    {
+        $InputText | & $FilePath @ArgumentList 2>&1
+    }
+    else
+    {
+        & $FilePath @ArgumentList 2>&1
+    }
     $code = $LASTEXITCODE
     if ($code -ne 0 -and -not $AllowFail)
     {
-        # Include arguments to make failures easier to diagnose
-        $full = "$FilePath $($ArgumentList -join ' ')"
-        throw ("Command failed ({0}): {1}`n{2}" -f $code, $full, ($out -join "`n"))
+        # Redacted command line: failures must never echo secret argument
+        # values into console/CI logs.
+        throw ("Command failed ({0}): {1}`n{2}" -f $code, $cmd, ($out -join "`n"))
     }
     return @{ ExitCode = $code; Output = $out }
 }
@@ -118,11 +135,14 @@ function New-RepoSecret
     }
     $secretBody = [System.Environment]::GetEnvironmentVariable($SecretName)
     if (-not $secretBody) { throw "Environment variable for secret '$SecretName' not found." }
-    $ghArgs = @('secret', 'set', $SecretName, '--body', $secretBody, '--repo', "$Owner/$RepoName")
+    # No --body: gh reads the value from stdin, so the secret never appears
+    # in the gh process's argv (readable by process enumeration); the
+    # redaction hint keeps it out of verbose/failure messages too.
+    $ghArgs = @('secret', 'set', $SecretName, '--repo', "$Owner/$RepoName")
     Write-Verbose "Creating GitHub repo secret: $SecretName for $Owner/$RepoName"
     if ($PSCmdlet.ShouldProcess($SecretName, 'Create GitHub repo secret'))
     {
-        Invoke-External -FilePath 'gh' -ArgumentList $ghArgs | Out-Null
+        Invoke-External -FilePath 'gh' -ArgumentList $ghArgs -InputText $secretBody -RedactValues $secretBody | Out-Null
     }
     else
     {
@@ -300,7 +320,11 @@ function Update-TemplatePlaceholders
     foreach ($path in ($templatePaths | Sort-Object { $_.FullName.Length } -Descending))
     {
         $newName = $path.Name -replace $templatePattern, $ReplacementText
-        $newPath = Join-Path $path.DirectoryName $newName
+        # .NET parent lookup, not $path.DirectoryName: DirectoryInfo has no
+        # DirectoryName property, and common-auth's Set-StrictMode turns the
+        # miss into a terminating error for directory renames.
+        $parent = [System.IO.Path]::GetDirectoryName($path.FullName)
+        $newPath = Join-Path $parent $newName
         Write-Verbose "[TRACE:Replace] RENAME: $($path.FullName) -> $newPath"
         if ($DryRun)
         {
@@ -430,8 +454,15 @@ function Invoke-GitClone
 function Copy-PlanDocs
 {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$SourceDir, [Parameter(Mandatory)][string]$RepoRoot)
-    $docs = Join-Path $RepoRoot $docsDir
+    param(
+        [Parameter(Mandatory)][string]$SourceDir,
+        [Parameter(Mandatory)][string]$RepoRoot,
+        # Destination subdirectory under the repo root. A parameter, not the
+        # caller's script-scope variable: this is a shared library, and any
+        # consumer must be able to call it without pre-defining $docsDir.
+        [Parameter()][string]$DocsSubDir = 'plan_docs'
+    )
+    $docs = Join-Path $RepoRoot $DocsSubDir
     if ($DryRun)
     {
         Write-Verbose "[dry-run] Would copy plan docs: $SourceDir -> $docs"
@@ -480,7 +511,9 @@ function Invoke-GitCommitAndPush
     }
     # Determine current branch and push explicitly (handles fresh repos)
     $branch = (Invoke-External -FilePath 'git' -ArgumentList @('-C', $RepoRoot, 'branch', '--show-current')).Output | Select-Object -First 1
-    $branch = $branch.Trim()
+    # Empty output (detached HEAD) yields $null — guard the trim so the
+    # empty-name fallback below survives exactly the case it exists for.
+    if ($branch) { $branch = $branch.Trim() }
     if (-not $branch) { $branch = 'main' }
     $rebased = $false
     if ($PSCmdlet.ShouldProcess($RepoRoot, "Push changes to origin/$branch"))

@@ -44,7 +44,7 @@
     stage 1, create-repo-with-plan-docs.ps1). That ordering is harmless: this
     script only removes template-self state under .agents/ and docs/plans/,
     never the clone's freshly copied plan_docs/.
-    See docs/plans/fold-workflow-launch2-into-service.md.
+    See docs/plans/completed/fold-workflow-launch2-into-service.md.
 #>
 
 [CmdletBinding()]
@@ -125,8 +125,10 @@ function Remove-WildcardFiles {
         return , @()
     }
 
-    $matches = @(Get-ChildItem -LiteralPath $Directory -File -Force -Filter $Pattern)
-    foreach ($m in $matches) {
+    # Not $matches: that is the automatic variable the -match operator
+    # populates, and assigning it is a recognized corruption pitfall.
+    $files = @(Get-ChildItem -LiteralPath $Directory -File -Force -Filter $Pattern)
+    foreach ($m in $files) {
         if ($DryRun) {
             Write-Host " [dry-run] would remove: $($m.FullName)" -ForegroundColor Yellow
         }
@@ -136,7 +138,7 @@ function Remove-WildcardFiles {
         Write-Verbose "Removed: $($m.FullName)"
     }
 
-    return , $matches
+    return , $files
 }
 
 $completedDir = Join-Path $resolvedRoot 'docs/plans/.completed'
