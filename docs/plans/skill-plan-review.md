@@ -17,7 +17,7 @@ Questions**: the recommended option is built on a wrong launch delegate, a
 status surface that is not network-reachable as described, a
 self-containment rule the plan contradicts while claiming to follow it, and a
 label count the repo has already formally retracted. Four of these would cause
-implementation failure, not just confusion. Three of the seven Open Questions
+implementation failure, not just confusion. Four of the seven Open Questions
 are answerable today from existing repo evidence and should not be escalated.
 
 ---

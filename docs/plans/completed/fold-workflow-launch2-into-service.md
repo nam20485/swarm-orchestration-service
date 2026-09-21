@@ -1,8 +1,8 @@
 # Fold the workflow-launch2 launcher into swarm-orchestration-service
 
-**Status:** APPROVED and implemented — PR #20 against `development`, CI green
-2026-09-15, merge owner-gated. §9 follow-ups remain open, so this stays a
-top-level plan until the merge lands.
+**Status:** COMPLETE — merged into `development` as `632791a` (PR #20,
+2026-09-16; CI green 2026-09-15). Kept here as the design record; the §9
+follow-ups remain open and owner-gated.
 **Date:** 2026-09-15
 **Supersedes:** the scratch notes that were in
 `docs/plans/fold-workkspacxe-launc2-in-plan.md` (untracked; deleted 2026-09-15

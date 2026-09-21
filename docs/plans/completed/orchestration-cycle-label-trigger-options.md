@@ -1,7 +1,7 @@
 # Orchestration-Cycle Label Trigger — Options for a Plan
 
 **Archive status:** HISTORICAL — design analysis dated 2026-07-21, kept as design history.
-**Imported:** 2026-09-15 from `nam20485/workflow-launch2/docs/` during the launcher fold (`docs/plans/fold-workflow-launch2-into-service.md` §5.6); it would otherwise have been lost in that repo's teardown (plan §9).
+**Imported:** 2026-09-15 from `nam20485/workflow-launch2/docs/` during the launcher fold (`docs/plans/completed/fold-workflow-launch2-into-service.md` §5.6); it would otherwise have been lost in that repo's teardown (plan §9).
 **Landed as:** the label-driven orchestration cycle this service now implements in `src/webhook_receiver/filters.py` and `src/webhook_receiver/prompt_builder.py`; Axis A1's skill-completion label shipped as `gh-issue-tracking:init-success`.
 
 ---
