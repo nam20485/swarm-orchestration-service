@@ -438,7 +438,7 @@ Describe 'create-repo-agent-context.ps1 seed-commit push' {
         }, $true))
         $guards.Count | Should -Be 1 -Because 'the wrapper amends the seed commit exactly once'
         $guards[0].Extent.Text | Should -Match '-not\s+\$\s*DryRun' -Because 'a dry run must amend nothing'
-        $guards[0].Extent.Text | Should -Match 'git\s+push\s+--force-with-lease\s+origin\s+HEAD:main' -Because 'the amended seed commit must reach origin/main — stage 1 already pushed the pre-cleanup commit (PR #20 CRITICAL: amend without push shipped the template ask-permissions and model pins)'
+        $guards[0].Extent.Text | Should -Match 'git\s+push\s+--force-with-lease\s+origin\s+HEAD\s' -Because 'the amended seed commit must reach the branch stage 1 pushed (the agent-context template default, development — a generated repo has no main), not a hardcoded HEAD:main'
     }
 
     It 'aborts loudly when the amend or the push fails' {

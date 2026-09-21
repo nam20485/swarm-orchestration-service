@@ -103,7 +103,9 @@ Describe 'Complete-RunLog' {
             $last = $lines[-1] | ConvertFrom-Json
             $last.step | Should -Be 'complete'
             $last.message | Should -Match 'SUCCESS'
-            $last.data.elapsedSeconds | Should -BeOfType [double]
+            # Value, not type: the JSON round-trip demotes an integral
+            # elapsedSeconds (e.g. 0.0 → 0) to Int64 on pwsh 7.2+.
+            $last.data.elapsedSeconds | Should -BeGreaterOrEqual 0
         }
         finally {
             if (Test-Path $tmpDir) { Remove-Item $tmpDir -Recurse -Force }

@@ -240,6 +240,39 @@ Describe 'Invoke-External (non-DryRun)' {
         $result.ExitCode | Should -Be 7
     }
 
+    It 'Pipes -InputText to the child process stdin' {
+        # New-RepoSecret relies on this: the secret must reach gh via stdin,
+        # never as an argv entry readable from the host process list.
+        $result = Invoke-External -FilePath 'pwsh' -ArgumentList @('-NoProfile', '-Command', '$v = [Console]::In.ReadToEnd().Trim(); Write-Output "got[$v]"') -InputText 'stdin-payload-123'
+        ($result.Output -join '') | Should -Match 'got\[stdin-payload-123\]'
+    }
+
+    It 'Redacts -RedactValues in the failure message' {
+        $message = $null
+        try {
+            Invoke-External -FilePath 'git' -ArgumentList @('rev-parse', '--verify', 'SUPER-SECRET-VALUE') -RedactValues 'SUPER-SECRET-VALUE'
+        }
+        catch {
+            $message = $_.Exception.Message
+        }
+        $message | Should -Not -BeNullOrEmpty
+        $message | Should -Match '<redacted>'
+        $message | Should -Not -Match 'SUPER-SECRET-VALUE'
+    }
+
+    It 'Redacts -RedactValues in the verbose command echo' {
+        $verboseFile = Join-Path ([System.IO.Path]::GetTempPath()) "pester-verbose-$(Get-Random).txt"
+        try {
+            Invoke-External -FilePath 'git' -ArgumentList @('rev-parse', '--is-inside-work-tree', 'SUPER-SECRET-VALUE') -RedactValues 'SUPER-SECRET-VALUE' -AllowFail -Verbose 4> $verboseFile
+            $verboseText = Get-Content -LiteralPath $verboseFile -Raw
+            $verboseText | Should -Match '<redacted>'
+            $verboseText | Should -Not -Match 'SUPER-SECRET-VALUE'
+        }
+        finally {
+            Remove-Item -LiteralPath $verboseFile -ErrorAction SilentlyContinue
+        }
+    }
+
     It 'Returns dry-run output when DryRun is true' {
         $DryRun = $true
         $result = Invoke-External -FilePath 'gh' -ArgumentList @('repo', 'view', 'fake/repo')
@@ -285,12 +318,19 @@ Describe 'New-RepoSecret' {
 
     AfterAll { $DryRun = $true }
 
-    It 'Calls Invoke-External with correct gh secret set arguments' {
+    It 'Passes the secret via stdin, never on the command line' {
+        # gh reads the secret from stdin (no --body), and the redaction hint
+        # keeps the value out of Invoke-External's verbose/failure messages.
         $env:TEST_SECRET_VAR = 'super-secret-value'
         Mock Invoke-External { return @{ ExitCode = 0; Output = @() } }
         New-RepoSecret -Owner 'test-org' -RepoName 'test-repo' -SecretName 'TEST_SECRET_VAR' -Confirm:$false
         Should -Invoke Invoke-External -Times 1 -ParameterFilter {
-            $FilePath -eq 'gh' -and $ArgumentList -contains 'secret'
+            $FilePath -eq 'gh' -and
+            $ArgumentList -contains 'secret' -and
+            $ArgumentList -notcontains '--body' -and
+            $ArgumentList -notcontains 'super-secret-value' -and
+            $InputText -eq 'super-secret-value' -and
+            $RedactValues -contains 'super-secret-value'
         }
         Remove-Item Env:\TEST_SECRET_VAR -ErrorAction SilentlyContinue
     }
@@ -549,7 +589,6 @@ Describe 'Wait-TemplateReady (non-DryRun)' {
 Describe 'Copy-PlanDocs (non-DryRun)' {
     BeforeAll {
         $DryRun = $false
-        $docsDir = 'plan_docs'
         . $script:FuncFile
     }
 
@@ -687,21 +726,25 @@ Describe 'ReplaceOnly parameter set' {
         }
     }
 
-    It 'Throws when placeholders remain after replacement' {
+    It 'Replaces placeholders in nested and binary-like paths (observable exit 0)' {
+        # Was 'Throws when placeholders remain' with zero assertions: the
+        # seeded .bin file and directory ARE rewritten/renamed by
+        # Update-TemplatePlaceholders regardless of extension, so the script
+        # legitimately exits 0 — assert exactly that, observably.
         $tmpRepo = Join-Path ([System.IO.Path]::GetTempPath()) "pester-replace-fail-$(Get-Random)"
         New-Item -ItemType Directory -Path $tmpRepo -Force | Out-Null
-        # Use a name that, when substituted, still leaves the template text elsewhere
-        # Actually, create a file that won't match the template text at all to force assertion failure
-        # The script replaces $TEMPLATE_REPO_NAME with $RepoName.  We'll put the template text in a
-        # path-name that Update-TemplatePlaceholders won't touch (binary-like extension) to force the assertion.
         $subDir = Join-Path $tmpRepo 'ai-new-workflow-app-template'
         New-Item -ItemType Directory -Path $subDir -Force | Out-Null
         Set-Content -LiteralPath (Join-Path $subDir 'data.bin') -Value 'ai-new-workflow-app-template'
         try {
-            # The assertion step should fail because path-name renames + content replace may still leave remnants
-            # depending on the implementation; if all gets replaced this test will need updating.
-            # For now, verify it at least runs the ReplaceOnly path.
             & $script:ScriptPath -RepoName 'another-project' -ExistingRepoRoot $tmpRepo 2>$null
+            $LASTEXITCODE | Should -Be 0 -Because 'the ReplaceOnly path owns its exit code and every placeholder is replaced'
+            # content replaced inside the (renamed) binary-like path
+            $dataFile = Join-Path $tmpRepo 'another-project' 'data.bin'
+            Test-Path -LiteralPath $dataFile | Should -BeTrue -Because 'path-name matches are renamed too, regardless of extension'
+            Get-Content -LiteralPath $dataFile -Raw | Should -Match 'another-project'
+            Get-Content -LiteralPath $dataFile -Raw | Should -Not -Match 'ai-new-workflow-app-template'
+            Test-Path -LiteralPath $subDir | Should -BeFalse -Because 'the template-named directory was renamed'
         }
         finally {
             if (Test-Path $tmpRepo) { Remove-Item $tmpRepo -Recurse -Force }
@@ -712,11 +755,15 @@ Describe 'ReplaceOnly parameter set' {
 Describe 'Error handling (catch block)' {
     It 'Exits with non-zero and reports FAILED on error' {
         $cloneParent = Join-Path ([System.IO.Path]::GetTempPath()) "pester-err-$(Get-Random)"
-        # Use *>&1 to capture all streams including Write-Host (stream 6)
-        $output = & $script:ScriptPath -RepoName 'fail-test' -PlanDocsDir '/nonexistent/path/xyz' -CloneParentDir $cloneParent -Visibility 'public' -Yes *>&1
+        # Trigger the owner/visibility policy guard — it fires BEFORE stage 1
+        # (before any gh call and repo creation), under -DryRun too. The old
+        # non-DryRun '/nonexistent/path' variant only failed in unauthenticated
+        # CI; on an authenticated machine it created REAL public repos first.
+        $output = & $script:ScriptPath -RepoName 'fail-test' -PlanDocsDir (Join-Path ([System.IO.Path]::GetTempPath()) "pester-nosuch-$(Get-Random)") -CloneParentDir $cloneParent -Owner 'somefreeuser' -Visibility 'private' -DryRun -Yes *>&1
         $LASTEXITCODE | Should -Be 1
         ($output | Out-String) | Should -Match 'FAILED'
-        if (Test-Path $cloneParent) { Remove-Item $cloneParent -Recurse -Force }
+        ($output | Out-String) | Should -Match 'Invalid owner/visibility combination'
+        Test-Path -LiteralPath $cloneParent | Should -BeFalse -Because 'a dry run creates no clone directories'
     }
 }
 
