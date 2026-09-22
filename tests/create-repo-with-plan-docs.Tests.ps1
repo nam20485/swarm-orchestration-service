@@ -257,6 +257,22 @@ Describe 'Invoke-External (non-DryRun)' {
         { Invoke-External -FilePath 'pwsh' -ArgumentList @('-NoProfile', '-Command', 'exit 3') -InputText 'payload' } | Should -Throw '*Command failed (3)*'
     }
 
+    It 'Keeps stdout and stderr on separate lines in the failure message' {
+        # No-newline writes to both streams: concatenating the raw streams
+        # would fuse them into one "out...err" element; they must reach the
+        # failure message as separate lines.
+        $message = $null
+        try {
+            Invoke-External -FilePath 'pwsh' -ArgumentList @('-NoProfile', '-Command', '[Console]::Out.Write("stdout-no-newline"); [Console]::Error.Write("stderr-no-newline"); exit 3') -InputText 'payload'
+        }
+        catch {
+            $message = $_.Exception.Message
+        }
+        $message | Should -Match 'stdout-no-newline'
+        $message | Should -Match 'stderr-no-newline'
+        $message | Should -Not -Match 'stdout-no-newlinestderr-no-newline'
+    }
+
     It 'Redacts -RedactValues in the failure message' {
         $message = $null
         try {

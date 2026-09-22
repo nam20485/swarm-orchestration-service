@@ -104,6 +104,11 @@ function Invoke-External
         $child = [System.Diagnostics.Process]::new()
         $child.StartInfo = $psi
         [void]$child.Start()
+        # Drain both pipes before writing stdin: a payload larger than the
+        # OS pipe buffer, with a child writing output before it reads stdin,
+        # would else deadlock parent and child inside WaitForExit below.
+        $stdoutTask = $child.StandardOutput.ReadToEndAsync()
+        $stderrTask = $child.StandardError.ReadToEndAsync()
         try
         {
             $child.StandardInput.Write($InputText)
@@ -114,11 +119,12 @@ function Invoke-External
             # Child exited without reading stdin (e.g. bad args): its exit
             # code below is the meaningful failure, not the broken pipe.
         }
-        $stdoutTask = $child.StandardOutput.ReadToEndAsync()
-        $stderrTask = $child.StandardError.ReadToEndAsync()
         $child.WaitForExit()
         $code = $child.ExitCode
-        $out = ($stdoutTask.Result + $stderrTask.Result) -split "`r?`n"
+        # Split each stream separately: concatenating the raw strings would
+        # fuse stdout's last line with stderr's first when stdout lacks a
+        # trailing newline.
+        $out = ($stdoutTask.Result -split "`r?`n") + ($stderrTask.Result -split "`r?`n")
     }
     else
     {
