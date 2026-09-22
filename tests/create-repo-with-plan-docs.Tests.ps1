@@ -240,11 +240,21 @@ Describe 'Invoke-External (non-DryRun)' {
         $result.ExitCode | Should -Be 7
     }
 
-    It 'Pipes -InputText to the child process stdin' {
+    It 'Writes -InputText to the child stdin byte-exact (no trailing newline)' {
         # New-RepoSecret relies on this: the secret must reach gh via stdin,
-        # never as an argv entry readable from the host process list.
-        $result = Invoke-External -FilePath 'pwsh' -ArgumentList @('-NoProfile', '-Command', '$v = [Console]::In.ReadToEnd().Trim(); Write-Output "got[$v]"') -InputText 'stdin-payload-123'
-        ($result.Output -join '') | Should -Match 'got\[stdin-payload-123\]'
+        # never as an argv entry readable from the host process list — and
+        # byte-exact, because `gh secret set` stores stdin verbatim while
+        # pwsh's native pipe appends a newline per object. The reader must
+        # NOT trim: a trailing newline would report len=18, not len=17.
+        $result = Invoke-External -FilePath 'pwsh' -ArgumentList @('-NoProfile', '-Command', '$v = [Console]::In.ReadToEnd(); Write-Output "len=$($v.Length)"') -InputText 'stdin-payload-123'
+        ($result.Output -join '') | Should -Be 'len=17'
+    }
+
+    It 'Throws on a non-zero exit with -InputText set' {
+        # The stdin branch no longer goes through the native pipeline, so
+        # $LASTEXITCODE is never set there — the exit code must come from the
+        # child process object instead.
+        { Invoke-External -FilePath 'pwsh' -ArgumentList @('-NoProfile', '-Command', 'exit 3') -InputText 'payload' } | Should -Throw '*Command failed (3)*'
     }
 
     It 'Redacts -RedactValues in the failure message' {

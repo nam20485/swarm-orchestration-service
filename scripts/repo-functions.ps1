@@ -87,15 +87,44 @@ function Invoke-External
     $cmd = "$FilePath $($displayArgs -join ' ')"
     Write-Verbose ">> $cmd"
     if ($DryRun) { return @{ ExitCode = 0; Output = @('<dry-run>') } }
-    $out = if ($PSBoundParameters.ContainsKey('InputText'))
+    if ($PSBoundParameters.ContainsKey('InputText'))
     {
-        $InputText | & $FilePath @ArgumentList 2>&1
+        # PowerShell's pipe appends a newline after every object piped to a
+        # native command, and `gh secret set` stores stdin verbatim — piping
+        # $InputText would store the secret with a trailing newline. Write the
+        # exact bytes to the child's stdin instead: no terminator, and (as
+        # before) no argv entry and no temp file on disk.
+        $psi = [System.Diagnostics.ProcessStartInfo]::new()
+        $psi.FileName = $FilePath
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardInput = $true
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        foreach ($arg in $ArgumentList) { [void]$psi.ArgumentList.Add($arg) }
+        $child = [System.Diagnostics.Process]::new()
+        $child.StartInfo = $psi
+        [void]$child.Start()
+        try
+        {
+            $child.StandardInput.Write($InputText)
+            $child.StandardInput.Close()
+        }
+        catch [System.IO.IOException]
+        {
+            # Child exited without reading stdin (e.g. bad args): its exit
+            # code below is the meaningful failure, not the broken pipe.
+        }
+        $stdoutTask = $child.StandardOutput.ReadToEndAsync()
+        $stderrTask = $child.StandardError.ReadToEndAsync()
+        $child.WaitForExit()
+        $code = $child.ExitCode
+        $out = ($stdoutTask.Result + $stderrTask.Result) -split "`r?`n"
     }
     else
     {
-        & $FilePath @ArgumentList 2>&1
+        $out = & $FilePath @ArgumentList 2>&1
+        $code = $LASTEXITCODE
     }
-    $code = $LASTEXITCODE
     if ($code -ne 0 -and -not $AllowFail)
     {
         # Redacted command line: failures must never echo secret argument
