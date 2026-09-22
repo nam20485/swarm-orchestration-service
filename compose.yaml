@@ -10,8 +10,8 @@
 #   OS_WEBHOOK_SECRET=<the GitHub App webhook secret>
 # Optional: WEBHOOK_SITE_ADDRESS (default :80) plus the listener knobs
 # forwarded below (WEBHOOK_LOG_LEVEL, WEBHOOK_MAX_BODY_BYTES,
-# WEBHOOK_EVENTS_KEEPALIVE, DIRECT_BODY_ALLOWED_SENDERS, and ACP_ENABLED,
-# pinned false — see its comment) — see .env.example.
+# WEBHOOK_EVENTS_KEEPALIVE, DIRECT_BODY_ALLOWED_SENDERS, and ACP_ENABLED
+# (default false — see its comment) — see .env.example.
 services:
   webhook-receiver:
     build:
