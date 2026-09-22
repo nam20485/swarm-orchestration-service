@@ -460,9 +460,10 @@ class TestCloneRootWorkspace:
         repo = clones / "repo"
         repo.mkdir(parents=True)
         (repo / ".git").write_text("gitdir: /elsewhere/repo/.git/worktrees/w\n")
-        monkeypatch.setattr(
-            AcpHost, "_checkout_is_repo", lambda self, workspace, expected: True
-        )
+        async def checkout_ok(self, workspace, expected):
+            return True
+
+        monkeypatch.setattr(AcpHost, "_checkout_is_repo", checkout_ok)
         cfg = make_settings(tmp_path, acp_clone_root=str(clones))
         conn, proc, calls = FakeConn(), FakeProc(), []
         install_spawn(monkeypatch, conn, proc, calls)

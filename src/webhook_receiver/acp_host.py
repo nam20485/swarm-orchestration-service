@@ -247,7 +247,7 @@ class AcpHost:
                 ) from exc
             workspace = sandbox.path
         else:
-            workspace = self._prepare_workspace(info)
+            workspace = await self._prepare_workspace(info)
         self._write_deny_config(workspace, delivery_id=info.delivery_id)
         client = HostClient(self._settings, self._store, run_id=info.id)
         step = self._settings.acp_step_timeout
@@ -363,7 +363,7 @@ class AcpHost:
             workspace=str(workspace),
         )
 
-    def _prepare_workspace(self, info: PromptInfo) -> Path:
+    async def _prepare_workspace(self, info: PromptInfo) -> Path:
         """Session cwd for the agent; a scratch dir is never the service's
         own repo — ``ACP_CLONE_ROOT`` deliberately maps onto the launcher's
         real checkout of the envelope's repo instead.
@@ -394,7 +394,7 @@ class AcpHost:
                     f"{workspace} (ACP_CLONE_ROOT set — create/clone the repo, "
                     "or unset the knob for scratch workspaces)"
                 )
-            if not self._checkout_is_repo(workspace, info.repo):
+            if not await self._checkout_is_repo(workspace, info.repo):
                 raise AcpHostError(
                     f"clone checkout identity mismatch for delivery "
                     f"{info.delivery_id}: {workspace} is not a checkout of "
@@ -411,15 +411,20 @@ class AcpHost:
         return workspace
 
     @staticmethod
-    def _checkout_is_repo(workspace: Path, repo: str) -> bool:
+    async def _checkout_is_repo(workspace: Path, repo: str) -> bool:
         """True when the checkout's ``origin`` points at ``owner/repo``.
 
         Accepts the ssh (``git@host:owner/repo.git``) and https
         (``https://host/owner/repo.git[/]``) URL forms; anything unreadable
         or pointing elsewhere is a mismatch (fail closed).
+
+        The probe runs in a worker thread: ``run()`` executes directly on
+        the event loop, so a synchronous ``subprocess.run`` would stall
+        webhook handling and queue draining for up to its timeout.
         """
         try:
-            res = subprocess.run(
+            res = await asyncio.to_thread(
+                subprocess.run,
                 ["git", "-C", str(workspace), "remote", "get-url", "origin"],
                 capture_output=True,
                 text=True,
