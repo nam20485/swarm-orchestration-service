@@ -1,6 +1,8 @@
 # Dispatch into the live checkout (M1/M2)
 
-Status: PLAN — M1 step 1 in flight (`dev/acp-clone-workspace`).
+Status: LANDED — M1 landed via PR #23 (merged 2026-09-19 as `5df5c59`);
+retained at the top level as the living spec for the dual agent
+environments; M1/M2 leftovers open.
 Owner decision 2026-09-16 (this doc records it): dispatched sessions run
 **sandbox-less, in the launcher-minted clone**, and the clone's primary
 agent is a new **swarm-agent** (king) — the template `orchestrator` stops
