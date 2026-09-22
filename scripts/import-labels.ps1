@@ -98,11 +98,29 @@ if (-not $sourceLabels) {
 
 # Load existing labels from target repo (up to 100)
 try {
-    $existingLabels = gh api "repos/$Repo/labels" --paginate | ConvertFrom-Json
+    $existingLabels = @(gh api "repos/$Repo/labels" --paginate | ConvertFrom-Json)
 }
 catch {
     Write-Error "Failed to fetch labels from repo '$Repo'. Ensure you have access and are authenticated."
     exit 1
+}
+
+# gh signals an inaccessible or not-yet-created repo by writing a single JSON
+# error object to stdout and exiting non-zero. A native exit code never reaches
+# the catch above, and the payload has no 'name' property, so under
+# Set-StrictMode it would blow up in the lookup loop below rather than here.
+$apiErrorPayload = @($existingLabels | Where-Object {
+    $null -ne $_.PSObject.Properties['message'] -and $null -eq $_.PSObject.Properties['name']
+})
+if ($apiErrorPayload.Count -gt 0) {
+    if (-not $DryRun) {
+        Write-Error "Failed to fetch labels from repo '$Repo'. Ensure you have access and are authenticated."
+        exit 1
+    }
+    # A dry run may legitimately name a repo that does not exist yet: the launch
+    # pipeline previews a clone whose repo stage 1 only simulated creating.
+    Write-Warning "Could not read labels from '$Repo'; treating the target as empty for this dry run."
+    $existingLabels = @()
 }
 
 # Build lookup by name (case-insensitive)

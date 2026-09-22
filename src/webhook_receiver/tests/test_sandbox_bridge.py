@@ -481,7 +481,7 @@ class TestAcpHostWiring:
         settings = make_settings(tmp_path, sandbox_enabled=False)
         host = AcpHost(settings, EventStore())
         info = make_envelope()
-        workspace = host._prepare_workspace(info)
+        workspace = asyncio.run(host._prepare_workspace(info))
         assert workspace == Path(str(settings.acp_workspace_root)) / info.id
         assert workspace.is_dir()
 
