@@ -93,6 +93,11 @@ class TestAcpFromEnv:
 
     def test_acp_env_overrides(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("OS_WEBHOOK_SECRET", self.SECRET)
+        # ACP_CLONE_ROOT is set below; clear the sandbox knobs so an ambient
+        # SANDBOX_ENABLED=true can't trip the boot exclusivity check and fail
+        # this test for reasons it doesn't assert.
+        monkeypatch.delenv("SANDBOX_ENABLED", raising=False)
+        monkeypatch.delenv("SANDBOX_API_URL", raising=False)
         monkeypatch.setenv("ACP_OPENCODE_BIN", "/usr/local/bin/opencode")
         monkeypatch.setenv("ACP_WORKSPACE_ROOT", "/tmp/ws")
         monkeypatch.setenv("ACP_CLONE_ROOT", "~/src/github/nam20485/dynamic_workflows")
