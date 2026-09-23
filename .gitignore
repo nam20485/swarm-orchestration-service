@@ -69,3 +69,6 @@ desktop.ini
 
 # .NET test results (validation.ps1 -Step dotnet writes TestResults/)
 TestResults/
+
+# swarm telemetry run artifact (created/appended by swarm-analyst; never committed)
+docs/swarm-metrics.md

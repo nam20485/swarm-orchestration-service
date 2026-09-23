@@ -3,7 +3,7 @@
 
 <#
 .SYNOPSIS
-    Remove Class-2 template state from a freshly cloned agent-context instance.
+    Remove Class-2 template state from a freshly cloned swarm-context instance.
 
 .DESCRIPTION
     Idempotent post-clone cleanup script that removes the template's own
