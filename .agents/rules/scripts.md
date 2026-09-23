@@ -49,7 +49,7 @@ Built from each script's header comments and `param()` block. **Read the file he
 
 - `gh` authenticated with `repo`, `workflow` and `admin:org` scopes (the latter for secrets/variables).
 - A live SSH agent — `Invoke-GitClone` clones over `git@github.com:`, not HTTPS (setup: [`docs/wsl-ssh-agent-setup-guide.md`](../../docs/wsl-ssh-agent-setup-guide.md)).
-- `GEMINI_API_KEY` present in the environment for real launches — `New-RepoSecret` reads the secret body from the env var of that name and throws if it is unset; under `-DryRun` an unset var only warns.
+- ~~`GEMINI_API_KEY`~~ retired 2026-09-23 (no key; owner may adopt a different provider later) — the launcher sets no repo secrets by default.
 - `code-insiders` on PATH, only when `-LaunchEditor` is passed.
 - The `nam20485/swarm-context` parent template reachable (GitHub template route; cross-owner stamp with nam20485's PAT).
 
