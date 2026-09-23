@@ -28,7 +28,7 @@ No hard type cap (the old ≤5 rule was dropped by user direction, 2026-09-06): 
 
 ## Post-wave analysis
 
-After each wave's workers report, spawn one `swarm-analyst` for the whole wave (never one per agent — cross-referencing sessions is the point). It parses `~/.zcode/cli/agents/<sess>/<agent>/metadata.json` + `~/.zcode/cli/rollout/model-io-sess_subagent_<agent>.jsonl`, appends metrics rows and anomalies to [`docs/swarm-metrics.md`](../../docs/swarm-metrics.md) (the only file it writes), and returns ranked anomalies with one-line fixes. The orchestrator reads that report before composing the next wave — anomalies feed decomposition (contention → re-split by build unit; duplicate discovery → inject excerpts; wasted calls → narrow toolset or tighten Done-when).
+After each wave's workers report, spawn one `swarm-analyst` for the whole wave (never one per agent — cross-referencing sessions is the point). It parses `~/.zcode/cli/agents/<sess>/<agent>/metadata.json` + `~/.zcode/cli/rollout/model-io-sess_subagent_<agent>.jsonl`, appends metrics rows and anomalies to `docs/swarm-metrics.md` (gitignored run artifact, created with a header if missing; the only file it writes), and returns ranked anomalies with one-line fixes. The orchestrator reads that report before composing the next wave — anomalies feed decomposition (contention → re-split by build unit; duplicate discovery → inject excerpts; wasted calls → narrow toolset or tighten Done-when).
 
 ## MCP servers
 
