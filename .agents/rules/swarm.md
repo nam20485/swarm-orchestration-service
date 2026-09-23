@@ -8,7 +8,7 @@ The primary session acts as the orchestrator and spawns worker subagents through
 
 ## Locations
 
-- Agent definitions are real ZCode-format files in `.zcode/agents/` — no symlinks, no canonical copies elsewhere. ZCode-specific definitions are not readable by other harnesses; supporting another harness means generating native definitions for it (deferred until a second harness is chosen).
+- Agent definitions are real ZCode-format files in `.zcode/agents/` — no symlinks, no canonical copies elsewhere. ZCode-specific definitions are not readable by other harnesses; supporting another harness means generating native definitions for it. The second harness is chosen — opencode — and its native definitions live in `.opencode/agents/swarm-*.md` (see the roster-mirror rule below).
 - The skill lives at `.agents/skills/swarm/` (repo convention; workspace discovery from `.agents/skills/` is empirically confirmed by this repo's existing skills).
 - Run state lives under `.swarm/<run-id>/` (`goal.md`, `state.json`, `field-guide.md`) and is gitignored — local-only, never committed.
 - Shared worker instructions live in [`.agents/rules/swarm-workers.md`](swarm-workers.md) — the workers' conventions channel (see below).
@@ -24,7 +24,7 @@ The primary session acts as the orchestrator and spawns worker subagents through
 | `swarm-reviewer` | Read, Grep, Glob, Bash | diff / quality review |
 | `swarm-analyst` | Read, Grep, Glob, Bash | post-wave telemetry: parses subagent session logs, appends metrics to `docs/swarm-metrics.md`, reports ranked anomalies |
 
-No hard type cap (the old ≤5 rule was dropped by user direction, 2026-09-06): every type must be narrowly single-purpose with the smallest sufficient toolset — the narrower the definition, the more focused the worker. All definitions set `injectAgentsMd: false` — workers get their conventions from `.agents/rules/swarm-workers.md` plus the task's Constraints element, not from the primary session's AGENTS.md (whose mandates reference tools they lack). All worker definitions set `model: GLM-5.3-Flash` + `thoughtLevel: off` — extended thinking at the worker level was measured as a cost driver (32K thinking budget + `effort: max` on every request); reasoning belongs at the orchestrator level, worker tasks must be straightforward directions.
+No hard type cap (the old ≤5 rule was dropped by user direction, 2026-09-06): every type must be narrowly single-purpose with the smallest sufficient toolset — the narrower the definition, the more focused the worker. All definitions set `injectAgentsMd: false` — workers get their conventions from `.agents/rules/swarm-workers.md` plus the task's Constraints element, not from the primary session's AGENTS.md (whose mandates reference tools they lack). All worker definitions set `model: GLM-5.3-Flash` + `thoughtLevel: off` — extended thinking at the worker level was measured as a cost driver (32K thinking budget + `effort: max` on every request); reasoning belongs at the orchestrator level, worker tasks must be straightforward directions. The roster is mirrored on opencode as `.opencode/agents/swarm-*.md` (native opencode frontmatter; `default_agent: swarm-orchestrator` — the king, who also runs dispatches himself on that harness) — keep the two sets mirrored in rules and roster, each in its harness's format.
 
 ## Post-wave analysis
 

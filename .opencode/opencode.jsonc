@@ -4,7 +4,7 @@
   "instructions": [
     "AGENTS.md"
   ],
-  "default_agent": "orchestrator",
+  "default_agent": "swarm-orchestrator",
   "model": "zai-coding-plan/glm-5.2",
   "small_model": "zai-coding-plan/glm-4.5-air",
   "permission": {
