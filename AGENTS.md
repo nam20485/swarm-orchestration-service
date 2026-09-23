@@ -39,7 +39,7 @@ Rules dictate coding conventions, tools, validation, testing, source control, de
   - `dotnet-aspire-aspnet-blazor` — .NET Aspire + ASP.NET Core + Blazor WASM
   - `dotnet-avalonia-xplatform-desktop` — .NET Avalonia cross-platform desktop
   - `python-uv-fastapi-vite` — Python (uv) + FastAPI + Vite frontend
-- **Swarm**: [`.agents/rules/swarm.md`](.agents/rules/swarm.md) — goal-driven agent swarm on the ZCode harness: primary-session orchestrator + narrowly single-purpose least-privilege worker types, `$swarm` skill entry point with an optional interactive planning frontend (`/swarm plan` → the `swarm-plan` skill: plan → goal approval → gh-issue-tracking-init → swarm), shared worker rules in `.agents/rules/swarm-workers.md`, run state under gitignored `.swarm/<run-id>/`.
+- **Swarm**: [`.agents/rules/swarm.md`](.agents/rules/swarm.md) — goal-driven agent swarm on the ZCode harness: primary-session orchestrator + narrowly single-purpose least-privilege worker types, `$swarm` skill entry point with an optional interactive planning frontend (`/swarm plan` → the `swarm-plan` skill: plan → goal approval → gh-issue-tracking-init → swarm), shared worker rules in `.agents/rules/swarm-workers.md`, run state under gitignored `.swarm/<run-id>/`. The roster is mirrored on opencode as `.opencode/agents/swarm-*.md` with `default_agent: swarm-orchestrator` (the king — dispatch sessions land on him; per the ACP parity rule the two sets stay word-for-word mirrored in rules, each in its harness's native frontmatter).
 
 **IMPORTANT:** Check the relevant rules file before working on any file or performing implementation.
 

@@ -50,8 +50,7 @@ scratch dir cannot work for this dispatch class.
    seed `.opencode/agents/swarm-agent.md` into clones and switch
    `default_agent` to it in the post-clone transforms (the launcher already
    rewrites `opencode.jsonc` — permission shorthand, model-pin strip; the
-   template repos stay untouched). Sketch of the king's rules:
-   - Every dispatch lands on you. You are the agent-in-charge of this repo —
+   template repos stay untouched). Sketch of the king's rules:   - Every dispatch lands on you. You are the agent-in-charge of this repo —
      run it yourself by default: execute skills, make edits, run scripts,
      publish branches/PRs/labels.
    - Do **not** auto-swarm. Escalate to a subagent swarm on exactly two
@@ -69,6 +68,18 @@ scratch dir cannot work for this dispatch class.
    - End every turn with a short status (done / blocked / next).
    - Permissions: author it allow-first (bash/edit allow) with targeted
      denies; the seeder's coordinator-skip must not apply to it.
+
+   > **LANDED 2026-09-23, differently than sketched (owner direction):** the
+   > king already existed — `swarm-orchestrator` in `.zcode/agents/` is the
+   > king of the swarm; dispatches land on him and he runs them himself
+   > (init always solo). Seeding = **opencode ports** of the whole
+   > `swarm-*` roster into `.opencode/agents/` (native opencode frontmatter,
+   > `mode: primary` king + `mode: subagent` workers, rules mirrored
+   > word-for-word) + `default_agent: swarm-orchestrator` in
+   > `opencode.jsonc`, landed in the parent template (swarm-context) so
+   > clones stamp with them — no launcher seeding stage needed. The
+   > coordinator quartet stays available (additive rule). The allow-first
+   > bash/edit permission shape landed as sketched.
 3. **Host-run cutover** (ops, owner-witnessed): `.env` gains
    `ACP_CLONE_ROOT=~/src/github/nam20485/dynamic_workflows`; run the
    receiver host-side (`.venv/bin/python -m webhook_receiver`, env loaded);

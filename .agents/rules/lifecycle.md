@@ -99,10 +99,17 @@ upstream flow.
 | --- | --- | --- |
 | ZCode — swarm workers | `.zcode/agents/` (parent template + this repo, byte-identical) | yes — the `swarm-*.md` set |
 | ZCode — global | `~/.zcode/agents/` | no (octet only) |
+| opencode — swarm (king + workers) | `.opencode/agents/swarm-*.md` (parent template + this repo, mirrored) | yes — opencode ports of the ZCode defs; `default_agent: swarm-orchestrator` |
 | opencode — user level | `~/.config/opencode/agent/` | no |
-| opencode — clone level | `<clone>/.opencode/agents/` | no (template octet) |
+| opencode — clone level | `<clone>/.opencode/agents/` (stamped from the parent) | yes, post-port — the king (`swarm-orchestrator`, primary mode, runs dispatches himself) + the worker roster (subagent mode) |
 
-The ACP dispatch path drives **opencode** — ZCode definitions are invisible
-to it. The M1 king (opencode `swarm-agent.md` + `default_agent` flip) is
-still to author — per the parity rule, author both client sides in one
-move and land them in the parent template so they stamp into clones.
+The ACP dispatch path drives **opencode**, so the opencode ports are what
+dispatched sessions load: the king (`swarm-orchestrator`, the default
+agent) executes solo dispatches himself — `/gh-issue-tracking-init` among
+them — and swarms via the `task` tool to the subagent-mode workers when
+the work earns it. The ZCode defs stay canonical for ZCode-harness runs
+(and the sandbox); keep the two sets mirrored — same roster, same rules,
+each harness's native frontmatter. Model pins in the ports
+(`zai-coding-plan/glm-5.3-flash` workers, `qwencloud/qwen3.8-max` king)
+are stripped at clone-mint time by `strip-model-settings.ps1`, per plan
+Decision 10.
