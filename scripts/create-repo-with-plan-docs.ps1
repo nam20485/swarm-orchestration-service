@@ -200,8 +200,17 @@ try {
     if ($PSCmdlet.ParameterSetName -eq 'ReplaceOnly') {
         Write-Host "Replacing placeholders in existing repo '$ExistingRepoRoot'..." -ForegroundColor Cyan -NoNewline
         $resolvedRepoRoot = (Resolve-Path -LiteralPath $ExistingRepoRoot).Path
+        # Owner-slug pass first (precise): <templateOwner>/<templateRepo> -> <owner>/<repo>.
+        # The old bare-owner replace would mangle legitimate nam20485/* references the
+        # swarm-context parent carries (e.g. nam20485/agent-instructions).
+        $remoteOwner = $TemplateOwner
+        $remoteUrl = (Invoke-External -FilePath 'git' -ArgumentList @('-C', $resolvedRepoRoot, 'remote', 'get-url', 'origin') -AllowFail).Output -join ''
+        if ($remoteUrl -match 'github\.com[:/]([^/]+)/') { $remoteOwner = $Matches[1] }
+        Update-TemplatePlaceholders -RepoRoot $resolvedRepoRoot -TemplateText "$TemplateOwner/$TemplateRepoName" -ReplacementText "$remoteOwner/$RepoName"
+        Assert-NoTemplatePlaceholdersRemaining -RepoRoot $resolvedRepoRoot -TemplateText "$TemplateOwner/$TemplateRepoName"
         Update-TemplatePlaceholders -RepoRoot $resolvedRepoRoot -TemplateText $TemplateRepoName -ReplacementText $RepoName
         Assert-NoTemplatePlaceholdersRemaining -RepoRoot $resolvedRepoRoot -TemplateText $TemplateRepoName
+        Update-InstanceIdentification -RepoRoot $resolvedRepoRoot -Owner $remoteOwner -RepoName $RepoName -TemplateOwner $TemplateOwner -TemplateRepoName $TemplateRepoName -DryRun:$DryRun
         Write-Host ' done' -ForegroundColor Green
         Write-Output "SUCCESS: template placeholders replaced and validated in '$resolvedRepoRoot'"
         if (Get-Command Complete-RunLog -ErrorAction SilentlyContinue) { Complete-RunLog -Status 'SUCCESS' }
@@ -318,51 +327,35 @@ try {
         Write-Verbose "[TRACE:Main] repoName: '$repoName'"
         Write-Verbose "[TRACE:Main] TEMPLATE_OWNER: '$TemplateOwner' | Owner: '$Owner'"
 
+        # Replace the template's owner-prefixed slug first (precise): e.g.
+        # nam20485/swarm-context -> intel-agency/<repo>. A bare-owner replace would
+        # mangle legitimate nam20485/* references the swarm-context parent carries
+        # (e.g. nam20485/agent-instructions); the slug form only retargets the
+        # template's own path references.
+        Write-Host 'Replacing template placeholders (owner slug)...' -ForegroundColor Cyan -NoNewline
+        Write-Verbose '[TRACE:Main] --- Step 1: Replace owner slug ---'
+        $ownerLower = $Owner.ToLower()
+        if ($ownerLower -ne $TemplateOwnerLower) {
+            Update-TemplatePlaceholders -RepoRoot $clonePath -TemplateText "$TemplateOwner/$TemplateRepoName" -ReplacementText "$Owner/$repoName"
+            Assert-NoTemplatePlaceholdersRemaining -RepoRoot $clonePath -TemplateText "$TemplateOwner/$TemplateRepoName"
+        }
+        else {
+            Write-Verbose "[TRACE:Main] --- Step 1: SKIPPED (owner unchanged: '$Owner' == '$TemplateOwnerLower') ---"
+        }
+        Write-Host ' done' -ForegroundColor Green
+
         # Replace template placeholders in file contents and path names
         Write-Host 'Replacing template placeholders (repo name)...' -ForegroundColor Cyan -NoNewline
-        Write-Verbose '[TRACE:Main] --- Step 1: Replace repo name ---'
+        Write-Verbose '[TRACE:Main] --- Step 2: Replace repo name ---'
         Update-TemplatePlaceholders -RepoRoot $clonePath -TemplateText $TemplateRepoName -ReplacementText $repoName
         Assert-NoTemplatePlaceholdersRemaining -RepoRoot $clonePath -TemplateText $TemplateRepoName
         Write-Host ' done' -ForegroundColor Green
 
-        # Replace template owner in image/registry references (e.g. ghcr.io/intel-agency/... -> ghcr.io/nam20485/...)
-        $ownerLower = $Owner.ToLower()
-        if ($ownerLower -ne $TemplateOwnerLower) {
-            Write-Host 'Replacing template placeholders (owner)...' -ForegroundColor Cyan -NoNewline
-            Write-Verbose '[TRACE:Main] --- Step 2: Replace owner ---'
-            Write-Verbose "Replacing template owner '$TemplateOwner' -> '$Owner' in file contents"
-            Update-TemplatePlaceholders -RepoRoot $clonePath -TemplateText $TemplateOwner -ReplacementText $Owner
-            Assert-NoTemplatePlaceholdersRemaining -RepoRoot $clonePath -TemplateText $TemplateOwner
-            Write-Host ' done' -ForegroundColor Green
-        }
-        else {
-            Write-Verbose "[TRACE:Main] --- Step 2: SKIPPED (owner unchanged: '$Owner' == '$TemplateOwnerLower') ---"
-        }
-
-        # Rewrite AGENTS.md to identify this as a project instance, not the source template.
-        # Generic placeholder replacements have already run, so the parenthetical now shows the new
-        # repo name — we only need to flip the label text and restore the template source reference.
+        # Rewrite AGENTS.md/README.md identity from template to project instance
+        # (both template generations — see Update-InstanceIdentification in repo-functions.ps1).
         Write-Host 'Rewriting AGENTS.md instance identification...' -ForegroundColor Cyan -NoNewline
-        $agentsMdPath = Join-Path $clonePath 'AGENTS.md'
-        if (Test-Path -LiteralPath $agentsMdPath) {
-            $agentsMd = Get-Content -LiteralPath $agentsMdPath -Raw
-            $oldLabel = '**GitHub template repo**'
-            $newLabel = "**project instance** cloned from the ``$TemplateOwner/$TemplateRepoName`` GitHub template"
-            if ($agentsMd.Contains($oldLabel)) {
-                $agentsMd = $agentsMd.Replace($oldLabel, $newLabel)
-                if (-not $DryRun) {
-                    Set-Content -LiteralPath $agentsMdPath -Value $agentsMd -NoNewline
-                } else {
-                    Write-Warning '[dry-run] Would rewrite AGENTS.md instance identification'
-                }
-                Write-Host ' done' -ForegroundColor Green
-            } else {
-                Write-Host ' skipped (already updated)' -ForegroundColor DarkGray
-            }
-        } else {
-            Write-Warning "AGENTS.md not found at '$agentsMdPath'"
-            Write-Host ' skipped' -ForegroundColor Yellow
-        }
+        Update-InstanceIdentification -RepoRoot $clonePath -Owner $Owner -RepoName $repoName -TemplateOwner $TemplateOwner -TemplateRepoName $TemplateRepoName -DryRun:$DryRun
+        Write-Host ' done' -ForegroundColor Green
 
         $workspacePath = Join-Path $clonePath "$repoName.code-workspace"
         if (Test-Path -LiteralPath $workspacePath -PathType Leaf) {
@@ -384,43 +377,23 @@ try {
             # Re-run all replacements on the rebased tree.
             Write-Warning 'Template race detected — re-running placeholder replacements after rebase...'
 
+            # Re-apply in the same order as the main flow: owner slug first, then repo name.
+            Write-Host 'Re-replacing template placeholders (owner slug) after rebase...' -ForegroundColor Cyan -NoNewline
+            if ($ownerLower -ne $TemplateOwnerLower) {
+                Update-TemplatePlaceholders -RepoRoot $clonePath -TemplateText "$TemplateOwner/$TemplateRepoName" -ReplacementText "$Owner/$repoName"
+                Assert-NoTemplatePlaceholdersRemaining -RepoRoot $clonePath -TemplateText "$TemplateOwner/$TemplateRepoName"
+            }
+            Write-Host ' done' -ForegroundColor Green
+
             Write-Host 'Re-replacing template placeholders (repo name) after rebase...' -ForegroundColor Cyan -NoNewline
-            Write-Verbose '[TRACE:Main] --- Post-rebase Step 1: Re-replace repo name ---'
             Update-TemplatePlaceholders -RepoRoot $clonePath -TemplateText $TemplateRepoName -ReplacementText $repoName
             Assert-NoTemplatePlaceholdersRemaining -RepoRoot $clonePath -TemplateText $TemplateRepoName
             Write-Host ' done' -ForegroundColor Green
 
-            $ownerLower = $Owner.ToLower()
-            if ($ownerLower -ne $TemplateOwnerLower) {
-                Write-Host 'Re-replacing template placeholders (owner) after rebase...' -ForegroundColor Cyan -NoNewline
-                Write-Verbose '[TRACE:Main] --- Post-rebase Step 2: Re-replace owner ---'
-                Update-TemplatePlaceholders -RepoRoot $clonePath -TemplateText $TemplateOwner -ReplacementText $Owner
-                Assert-NoTemplatePlaceholdersRemaining -RepoRoot $clonePath -TemplateText $TemplateOwner
-                Write-Host ' done' -ForegroundColor Green
-            }
-
-            # Re-apply AGENTS.md instance identification rewrite after rebase
+            # Re-apply AGENTS.md/README.md instance identification rewrite after rebase
             Write-Host 'Re-rewriting AGENTS.md instance identification after rebase...' -ForegroundColor Cyan -NoNewline
-            $agentsMdPath = Join-Path $clonePath 'AGENTS.md'
-            if (Test-Path -LiteralPath $agentsMdPath) {
-                $agentsMd = Get-Content -LiteralPath $agentsMdPath -Raw
-                $oldLabel = '**GitHub template repo**'
-                $newLabel = "**project instance** cloned from the ``$TemplateOwner/$TemplateRepoName`` GitHub template"
-                if ($agentsMd.Contains($oldLabel)) {
-                    $agentsMd = $agentsMd.Replace($oldLabel, $newLabel)
-                    if (-not $DryRun) {
-                        Set-Content -LiteralPath $agentsMdPath -Value $agentsMd -NoNewline
-                    } else {
-                        Write-Warning '[dry-run] Would rewrite AGENTS.md instance identification (post-rebase)'
-                    }
-                    Write-Host ' done' -ForegroundColor Green
-                } else {
-                    Write-Host ' skipped (already updated)' -ForegroundColor DarkGray
-                }
-            } else {
-                Write-Warning "AGENTS.md not found at '$agentsMdPath'"
-                Write-Host ' skipped' -ForegroundColor Yellow
-            }
+            Update-InstanceIdentification -RepoRoot $clonePath -Owner $Owner -RepoName $repoName -TemplateOwner $TemplateOwner -TemplateRepoName $TemplateRepoName -DryRun:$DryRun
+            Write-Host ' done' -ForegroundColor Green
 
             # Amend the seed commit with the post-rebase replacements and force push
             Write-Host 'Amending commit and force-pushing...' -ForegroundColor Cyan -NoNewline
