@@ -10,8 +10,10 @@
 #   OS_WEBHOOK_SECRET=<the GitHub App webhook secret>
 # Optional: WEBHOOK_SITE_ADDRESS (default :80) plus the listener knobs
 # forwarded below (WEBHOOK_LOG_LEVEL, WEBHOOK_MAX_BODY_BYTES,
-# WEBHOOK_EVENTS_KEEPALIVE, DIRECT_BODY_ALLOWED_SENDERS, and ACP_ENABLED
-# (default false — see its comment) — see .env.example.
+# WEBHOOK_EVENTS_KEEPALIVE, and DIRECT_BODY_ALLOWED_SENDERS — see
+# .env.example. ACP_* and SANDBOX_* are host-run-only: the compose image
+# has no opencode and no docker, so agent sessions cannot run there
+# (ACP_ENABLED is pinned false below).
 services:
   webhook-receiver:
     build:
@@ -22,10 +24,11 @@ services:
       - "8080"
     environment:
       - OS_WEBHOOK_SECRET=${OS_WEBHOOK_SECRET:?OS_WEBHOOK_SECRET is required}
-      # The image has no opencode, so the consumer must keep the Phase 1
-      # mark-consumed placeholder instead of attempting (and failing) ACP
-      # sessions per envelope. Host runs set ACP_ENABLED=true for dispatch.
-      - ACP_ENABLED=${ACP_ENABLED:-false}
+      # Pinned false — the image has no opencode, so the container must keep
+      # the Phase 1 mark-consumed placeholder. Dispatch runs host-side
+      # (.env ACP_ENABLED=true is deliberately NOT forwarded here: a .env
+      # true leaking into this image would fail-close every envelope).
+      - ACP_ENABLED=false
       - WEBHOOK_HOST=0.0.0.0
       - WEBHOOK_PORT=8080
       - WEBHOOK_LOG_LEVEL=${WEBHOOK_LOG_LEVEL:-info}
@@ -44,14 +47,17 @@ services:
       - CAP_NET_BIND_SERVICE
     ports:
       - "80:80"
+    # The cutover posture (owner decision 2026-09-23: keep the funnel
+    # endpoint): Caddy stays the public front door and forwards to the
+    # HOST-RUN receiver (dispatch mode) instead of the compose receiver.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       - WEBHOOK_SITE_ADDRESS=${WEBHOOK_SITE_ADDRESS:-:80}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
-    depends_on:
-      - webhook-receiver
     restart: unless-stopped
 
 volumes:
