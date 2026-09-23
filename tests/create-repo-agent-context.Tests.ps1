@@ -18,8 +18,8 @@
         policy guard runs BEFORE the plan-docs guard.
       * The -Help and missing -Slug early exits.
 
-    SAFETY — stage 1 (create-repo-with-plan-docs.ps1) shells out to git/gh,
-    needs GEMINI_API_KEY and creates directories under ../dynamic_workflows. The
+    SAFETY — stage 1 (create-repo-with-plan-docs.ps1) shells out to git/gh
+    and creates directories under ../dynamic_workflows. The
     guard order in the wrapper is (a) -Help -> exit 0, (b) blank -Slug -> exit 1,
     (c) policy guard throw, (d) plan-docs guard throw, and only then stage 1.
     Every out-of-process invocation below is deliberately built to stop at (a),
