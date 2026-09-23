@@ -19,6 +19,14 @@
 #   hooks.example.com  — automatic HTTPS (Let's Encrypt) on :443
 
 {$WEBHOOK_SITE_ADDRESS} {
+	# Full access logging (owner direction 2026-09-23: debug and regular
+	# sessions need the complete request stream, errors-only is not enough).
+	# Goes to the container's stderr = `docker compose logs webhook-proxy`.
+	log {
+		output stderr
+		level INFO
+	}
+
 	handle /webhooks/github {
 		reverse_proxy 127.0.0.1:8080
 	}
