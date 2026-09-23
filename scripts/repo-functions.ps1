@@ -598,3 +598,74 @@ function Wait-TemplateReady {
     }
     return @{ Ready = $false; ElapsedSeconds = $elapsed }
 }
+
+
+function Update-InstanceIdentification {
+    <#
+    .SYNOPSIS
+        Rewrite a freshly stamped clone's identity text (AGENTS.md, README.md) from template to project instance.
+
+    .DESCRIPTION
+        Handles both template generations. Grandparent (agent-context) stamps:
+        flips the '**GitHub template repo**' label in AGENTS.md. Parent
+        (swarm-context) stamps: the identity text describes template lineage
+        that is wrong for a stamped instance, so the whole identity paragraph
+        (AGENTS.md) and intro paragraph (README.md) are replaced. Run AFTER the
+        generic name/owner placeholder replacement so the files already carry
+        the instance's own names.
+
+    .NOTES
+        Idempotent: files already carrying instance wording are left untouched.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$Owner,
+        [Parameter(Mandatory)][string]$RepoName,
+        [Parameter(Mandatory)][string]$TemplateOwner,
+        [Parameter(Mandatory)][string]$TemplateRepoName,
+        [switch]$DryRun
+    )
+
+    $agentsPath = Join-Path $RepoRoot 'AGENTS.md'
+    if (Test-Path -LiteralPath $agentsPath) {
+        $agents = Get-Content -LiteralPath $agentsPath -Raw
+        $changed = $false
+
+        # Grandparent-stamped trees: label flip only.
+        $oldLabel = '**GitHub template repo**'
+        $newLabel = '**project instance** cloned from the `{0}/{1}` GitHub template' -f $TemplateOwner, $TemplateRepoName
+        if ($agents.Contains($oldLabel)) {
+            $agents = $agents.Replace($oldLabel, $newLabel)
+            $changed = $true
+        }
+
+        # Parent-stamped trees: replace the whole identity line.
+        if ($agents.Contains('**parent template**')) {
+            $instanceLine = 'This repository — **`{0}/{1}`** — is the **project instance** stamped from the `{2}/{3}` parent template: it carries the agent-context base plus the swarm surfaces (`.zcode/agents` worker definitions, `.agents/rules/swarm.md` + `swarm-workers.md`, the `$swarm` and `swarm-plan` skills) and houses this app''s plan (`plan_docs/`) and its development. When the user refers to "the parent template", "the swarm seed", or "a swarm-context clone", treat it as the template this repo was stamped from.' -f $Owner, $RepoName, $TemplateOwner, $TemplateRepoName
+            $agents = [regex]::Replace($agents, '(?m)^This repository .*parent template.*$', $instanceLine)
+            $changed = $true
+        }
+
+        if ($changed) {
+            if ($DryRun) { Write-Warning '[dry-run] Would rewrite AGENTS.md instance identification' }
+            else { Set-Content -LiteralPath $agentsPath -Value $agents -NoNewline }
+        }
+    }
+
+    $readmePath = Join-Path $RepoRoot 'README.md'
+    if (Test-Path -LiteralPath $readmePath) {
+        $readme = Get-Content -LiteralPath $readmePath -Raw
+        if ($readme.Contains('**parent template**')) {
+            $instanceIntro = @'
+This repository is a **project instance** stamped from the `{1}/{2}` parent
+template (GitHub template route) by the launcher in `{0}/swarm-orchestration-service`:
+it carries the agent-context base plus the swarm surfaces — `.zcode/agents` worker
+definitions, `.agents/rules/swarm.md` + `swarm-workers.md`, the `$swarm` / `swarm-plan`
+skills — and houses this app's plan (`plan_docs/`) and its development.
+'@ -f $TemplateOwner, $TemplateOwner, $TemplateRepoName
+            $readme = [regex]::Replace($readme, '(?s)This repository is the \*\*parent template\*\*.*?reviewed PRs\.', $instanceIntro.TrimEnd())
+            if ($DryRun) { Write-Warning '[dry-run] Would rewrite README.md instance identification' }
+            else { Set-Content -LiteralPath $readmePath -Value $readme -NoNewline }
+        }
+    }
+}
