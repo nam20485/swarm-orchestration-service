@@ -302,7 +302,8 @@ try {
         # Create repo secrets needed for agent auth
         #New-RepoSecret 'CLAUDE_CODE_OAUTH_TOKEN'
         Write-Host 'Setting repo secrets and variables...' -ForegroundColor Cyan -NoNewline
-        New-RepoSecret -Owner $Owner -RepoName $repoName -SecretName 'GEMINI_API_KEY'
+        # New-RepoSecret GEMINI_API_KEY retired 2026-09-23 — the key is gone (owner:
+        # no Gemini key; a different provider's secret can be re-added here when one exists).
         # New-RepoSecret -Owner $Owner -RepoName $repoName -SecretName 'ZHIPU_API_KEY'
         # need to add repository variables
         #VERSION_PREFIX = '0.0.1'
