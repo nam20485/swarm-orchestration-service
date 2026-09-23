@@ -3,7 +3,7 @@
 
 <#
 .SYNOPSIS
-    Create a new `agent-context`-seeded repo with Class-2 cleanup and
+    Create a new `swarm-context`-seeded repo with Class-2 cleanup and
     `/gh-issue-tracking-init` hierarchy dispatch.
 
 .DESCRIPTION
@@ -11,7 +11,7 @@
     `cleanup-template-state.ps1` and `trigger-gh-issue-tracking-init.ps1`.
 
     It accepts the core launch parameters (Slug, Owner, Visibility, Count,
-    Yes) plus agent-context-specific ones (-TriggerHierarchyInit, default
+    Yes) plus swarm-context-specific ones (-TriggerHierarchyInit, default
     $true).
 
     Owner/visibility policy: a private repo is only supported under `-Owner
@@ -182,9 +182,11 @@ if (-not (Test-OwnerVisibilityPolicy -Owner $Owner -Visibility $Visibility)) {
     throw ("Invalid owner/visibility combination: '{0}/{1}'. Private repos are only supported under the 'intel-agency' owner (Enterprise Cloud Actions minutes); free-tier private repos get no Actions minutes, so the clone's dispatch workflows could never run. Use -Owner intel-agency, or -Visibility public." -f $Owner, $Visibility)
 }
 
-# Agent-context template identity — hardcoded (this wrapper is agent-context-specific).
-$TemplateRepoName = 'agent-context'
-$TemplateOwner = 'intel-agency'
+# Swarm-context template identity — hardcoded (this wrapper mints
+# swarm-seeded clones; the parent template is pruned to
+# "agent-context base + swarm surfaces" — see .agents/rules/lifecycle.md).
+$TemplateRepoName = 'swarm-context'
+$TemplateOwner = 'nam20485'
 
 # Script-root-relative, so the pipeline runs from either repo root: plan docs
 # come from the sibling workflow-launch2 slug store (-PlanDocsRoot overrides),
@@ -196,7 +198,7 @@ if (-not (Test-Path -LiteralPath $PlanDocsDir)) {
 }
 
 # Source labels file is this repo's own .github/.labels.json — the canonical
-# dispatch label set. It must come from here, not the clone: the agent-context
+# dispatch label set. It must come from here, not the clone: the swarm-context
 # template ships no .labels.json, so label imports and bootstraps have no
 # per-clone source. This is the file every label (including the dispatch label)
 # is bootstrapped from.
