@@ -12,6 +12,13 @@
 # (listener-only) is not proxied in this posture; bring it back by
 # reverting the upstream to webhook-receiver:8080.
 #
+# Exposure note: the host receiver must NOT stay on the 0.0.0.0 default —
+# its full HTTP surface (incl. /events) would be reachable LAN-side,
+# bypassing this curated surface. Point WEBHOOK_HOST at the compose
+# network's gateway IP (what host.docker.internal resolves to from the
+# caddy container) so only this proxy can reach it, and firewall :8080
+# if the host is on untrusted networks.
+#
 # WEBHOOK_SITE_ADDRESS (compose env):
 #   :80                — HTTP only (local dev / behind external TLS)
 #   hooks.example.com  — automatic HTTPS (Let's Encrypt) on :443
