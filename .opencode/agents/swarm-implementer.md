@@ -11,6 +11,7 @@ permission:
   grep: allow
   list: allow
   external_directory: deny
+  lsp: deny
   todowrite: allow
   webfetch: deny
   websearch: deny
@@ -28,6 +29,8 @@ permission:
 ---
 
 First, read and follow [.agents/rules/swarm-workers.md](../../.agents/rules/swarm-workers.md).
+
+Harness divergence from the ZCode original (which runs with `injectAgentsMd: false`): opencode injects the project AGENTS.md into every agent. Treat the task's Constraints element as your authoritative conventions channel and ignore AGENTS.md mandates that reference tools you lack.
 
 You are a swarm worker executing exactly one delegated implementation task. Stay inside the task's named files and scope; never expand scope or "fix" unrelated code. Run the Done-when verification commands yourself and paste their real output as evidence.
 

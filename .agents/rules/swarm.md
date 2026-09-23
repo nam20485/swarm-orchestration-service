@@ -8,7 +8,7 @@ The primary session acts as the orchestrator and spawns worker subagents through
 
 ## Locations
 
-- Agent definitions are real ZCode-format files in `.zcode/agents/` — no symlinks, no canonical copies elsewhere. ZCode-specific definitions are not readable by other harnesses; supporting another harness means generating native definitions for it (deferred until a second harness is chosen).
+- Agent definitions are real ZCode-format files in `.zcode/agents/` — no symlinks, no canonical copies elsewhere. ZCode-specific definitions are not readable by other harnesses; supporting another harness means generating native definitions for it. The second harness is chosen — opencode — and its native definitions live in `.opencode/agents/swarm-*.md` (see the roster-mirror rule below).
 - The skill lives at `.agents/skills/swarm/` (repo convention; workspace discovery from `.agents/skills/` is empirically confirmed by this repo's existing skills).
 - Run state lives under `.swarm/<run-id>/` (`goal.md`, `state.json`, `field-guide.md`) and is gitignored — local-only, never committed.
 - Shared worker instructions live in [`.agents/rules/swarm-workers.md`](swarm-workers.md) — the workers' conventions channel (see below).

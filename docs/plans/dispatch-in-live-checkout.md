@@ -50,7 +50,9 @@ scratch dir cannot work for this dispatch class.
    seed `.opencode/agents/swarm-agent.md` into clones and switch
    `default_agent` to it in the post-clone transforms (the launcher already
    rewrites `opencode.jsonc` — permission shorthand, model-pin strip; the
-   template repos stay untouched). Sketch of the king's rules:   - Every dispatch lands on you. You are the agent-in-charge of this repo —
+   template repos stay untouched). Sketch of the king's rules:
+
+   - Every dispatch lands on you. You are the agent-in-charge of this repo —
      run it yourself by default: execute skills, make edits, run scripts,
      publish branches/PRs/labels.
    - Do **not** auto-swarm. Escalate to a subagent swarm on exactly two

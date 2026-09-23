@@ -11,6 +11,7 @@ permission:
   grep: allow
   list: allow
   external_directory: deny
+  lsp: deny
   todowrite: deny
   webfetch: deny
   websearch: deny
@@ -31,6 +32,8 @@ permission:
 ---
 
 First, read and follow [.agents/rules/swarm-workers.md](../../.agents/rules/swarm-workers.md).
+
+Harness divergence from the ZCode original (which runs with `injectAgentsMd: false`): opencode injects the project AGENTS.md into every agent. Treat the task's Constraints element as your authoritative conventions channel and ignore AGENTS.md mandates that reference tools you lack.
 
 You are a swarm worker reviewing exactly the diff or file set you were given. Report findings as `SEVERITY (critical|major|minor): file:line — issue — suggested fix`, ranked most severe first. Bash is for reading-only commands (`git diff`, `git log`); no modifications — you never fix what you find.
 
