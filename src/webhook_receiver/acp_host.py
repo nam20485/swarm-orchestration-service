@@ -33,13 +33,16 @@ Other ``session/update`` kinds (plan deltas, mode changes, thought chunks,
 available commands) are consumed and ignored — extend the mapping here if
 the dashboard needs them.
 
-**Harness trace (``docs/plans/harness-trace-parity.md`` D1/D2/D7):** the agent
+**Harness trace (``docs/plans/harness-trace-parity.md`` D1/D2/D3/D7):** the agent
 is spawned with ``--print-logs --log-level <ACP_HARNESS_LOG_LEVEL>`` so its own
 log stream — model calls, loop steps, context/skill loading — arrives on stderr
 while stdout stays the JSON-RPC channel, and ``drain_stderr`` surfaces each line
 at INFO with a ``[harness]`` label so journald is the single interleaved pane.
-``ACP_TRACE_ENABLED=false`` drops the flags and drains stderr silently at DEBUG;
-nothing else changes.
+Every line is also appended, redacted but otherwise unfiltered, to
+``<ACP_TRACE_ROOT>/<run_id>/harness.log`` with a ``manifest.json`` beside it
+(``trace_log``): journald rotates in about a day here and the event ring is
+volatile, so the run directory is the record. ``ACP_TRACE_ENABLED=false`` drops
+the flags, the files and the INFO logging together; nothing else changes.
 
 **Prompt seam (Phase 3):** the envelope's own ``prompt`` wins when present —
 the listener fills it with the open-ended orchestration prompt at enqueue
@@ -70,6 +73,7 @@ from acp.schema import (
 from webhook_receiver.acp_policy import PermissionDecision, decide, respond
 from webhook_receiver.prompt_queue import PromptInfo
 from webhook_receiver.sandbox_bridge import SandboxBridge, SandboxWorkspace
+from webhook_receiver.trace_log import RunTrace, open_run_trace, redact
 
 if TYPE_CHECKING:
     from webhook_receiver.config import Settings
@@ -77,10 +81,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Light stderr redaction (same shape as the spike): never echo credentials.
-_REDACT_RE = re.compile(
-    r"(?i)((?:api[_-]?key|authorization|token|secret)\s*[=:]\s*)\S+"
-)
 # Grace window for killing the agent process during shutdown/cleanup.
 _KILL_GRACE_SECONDS = 5.0
 
@@ -261,6 +261,16 @@ class AcpHost:
         step = self._settings.acp_step_timeout
         prompt_timeout = self._settings.acp_prompt_timeout
         trace_enabled = self._settings.acp_trace_enabled
+        trace: RunTrace | None = (
+            open_run_trace(
+                self._settings.acp_trace_root,
+                self._settings.acp_trace_keep_runs,
+                info,
+                workspace,
+            )
+            if trace_enabled
+            else None
+        )
         response: Any = None
         session_id: str | None = None
         conn: Any = None
@@ -273,19 +283,20 @@ class AcpHost:
                 return
             # The harness's own log stream (opencode ``--print-logs`` writes to
             # stderr) is the detail the event contract does not carry, so it is
-            # surfaced at INFO — journald is the single pane (D1/D2). With
-            # trace capture off it stays a DEBUG drain: read so the pipe never
-            # blocks, not published.
+            # surfaced at INFO — journald is the single pane (D1/D2) — and every
+            # line is also appended to the run's ``harness.log``, redacted but
+            # otherwise unfiltered (D3: the file is the record, the pane is the
+            # readable view). With trace capture off it stays a DEBUG drain:
+            # read so the pipe never blocks, not published.
             log = logger.info if trace_enabled else logger.debug
             while True:
                 line = await stream.readline()
                 if not line:
                     return
-                log(
-                    "[harness] run_id=%s: %s",
-                    info.id,
-                    _REDACT_RE.sub(r"\1<redacted>", line.decode(errors="replace").rstrip()),
-                )
+                text = redact(line.decode(errors="replace").rstrip())
+                if trace is not None:
+                    trace.write(text)
+                log("[harness] run_id=%s: %s", info.id, text)
 
         try:
             agent_args = ["acp", "--cwd", str(workspace)]
@@ -343,11 +354,18 @@ class AcpHost:
                 ok=False,
                 error=error,
             )
+            if trace is not None:
+                trace.finish(ok=False, error=error, session_id=session_id)
             raise AcpHostError(f"acp session failed for delivery {info.delivery_id}: {error}") from exc
         finally:
             if drainer is not None and not drainer.done():
                 drainer.cancel()
                 await asyncio.gather(drainer, return_exceptions=True)
+            if trace is not None:
+                # Closed after the drainer so no line is written to a closed
+                # handle. A shutdown cancel leaves the manifest without
+                # ``ended_at`` — that absence is the record of an abandoned run.
+                trace.close()
             if proc is not None and proc.returncode is None:
                 # Kill-on-exit orphan hygiene (spike pattern). The kill is
                 # the guarantee; reaping gets a short grace window and may
@@ -379,6 +397,10 @@ class AcpHost:
             stop_reason=stop_reason,
             ok=True,
         )
+        if trace is not None:
+            trace.finish(
+                ok=True, stop_reason=stop_reason or "", session_id=session_id
+            )
         return AcpRunResult(
             session_id=session_id or "",
             stop_reason=stop_reason or "",

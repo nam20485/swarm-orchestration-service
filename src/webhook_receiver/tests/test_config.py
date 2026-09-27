@@ -36,6 +36,8 @@ class TestFromEnv:
             "ACP_DENIED_TOOLS",
             "ACP_TRACE_ENABLED",
             "ACP_HARNESS_LOG_LEVEL",
+            "ACP_TRACE_ROOT",
+            "ACP_TRACE_KEEP_RUNS",
             "WEBHOOK_EVENTS_KEEPALIVE",
         ):
             monkeypatch.delenv(name, raising=False)
@@ -59,6 +61,10 @@ class TestFromEnv:
         # Harness trace (docs/plans/harness-trace-parity.md D1): on, at INFO.
         assert cfg.acp_trace_enabled is True
         assert cfg.acp_harness_log_level == "INFO"
+        # S2: artifacts land under logs/runs (relative to the service cwd,
+        # gitignored) with a 50-run retention window.
+        assert cfg.acp_trace_root == ""
+        assert cfg.acp_trace_keep_runs == 50
         # Dashboard SSE (Phase 5).
         assert cfg.events_keepalive == 15.0
 
@@ -113,6 +119,8 @@ class TestAcpFromEnv:
         monkeypatch.setenv("ACP_DENIED_TOOLS", "bash, write")
         monkeypatch.setenv("ACP_TRACE_ENABLED", "false")
         monkeypatch.setenv("ACP_HARNESS_LOG_LEVEL", "debug")
+        monkeypatch.setenv("ACP_TRACE_ROOT", "~/var/swarm-traces")
+        monkeypatch.setenv("ACP_TRACE_KEEP_RUNS", "7")
         cfg = Settings.from_env()
         assert cfg.acp_opencode_bin == "/usr/local/bin/opencode"
         assert cfg.acp_workspace_root == "/tmp/ws"
@@ -124,6 +132,16 @@ class TestAcpFromEnv:
         assert cfg.acp_denied_tools == ("bash", "write")
         assert cfg.acp_trace_enabled is False
         assert cfg.acp_harness_log_level == "DEBUG"
+        assert cfg.acp_trace_root == "~/var/swarm-traces"
+        assert cfg.acp_trace_keep_runs == 7
+
+    def test_invalid_trace_keep_runs_raises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("OS_WEBHOOK_SECRET", self.SECRET)
+        monkeypatch.setenv("ACP_TRACE_KEEP_RUNS", "0")
+        with pytest.raises(ValueError, match="ACP_TRACE_KEEP_RUNS must be at least 1"):
+            Settings.from_env()
 
     def test_invalid_harness_log_level_raises(
         self, monkeypatch: pytest.MonkeyPatch

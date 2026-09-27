@@ -85,6 +85,13 @@ class Settings:
     acp_trace_enabled: bool = True
     # One of ``opencode --log-level``'s choices; validated at boot.
     acp_harness_log_level: str = "INFO"
+    # Per-run artifact root: ``<root>/<run_id>/{harness.log,manifest.json}``.
+    # Empty → ``logs/runs`` relative to the service's working directory
+    # (gitignored). A relative path stays relative — the unit pins
+    # WorkingDirectory to the repo root.
+    acp_trace_root: str = ""
+    # Retention: newest N run directories kept, pruned when a run opens.
+    acp_trace_keep_runs: int = 50
     # --- SwarmSandbox bridge (Phase 4, plan §5 Decision 5) ---
     # Off by default: the Phase 2 plain scratch-dir workspace is kept, so CI
     # and dockerless local dev are unaffected. When enabled, the session cwd
@@ -153,6 +160,10 @@ class Settings:
                 + ", ".join(_HARNESS_LOG_LEVELS)
             )
 
+        trace_keep_runs = int(os.environ.get("ACP_TRACE_KEEP_RUNS", "50"))
+        if trace_keep_runs < 1:
+            raise ValueError("ACP_TRACE_KEEP_RUNS must be at least 1.")
+
         return cls(
             host=os.environ.get("WEBHOOK_HOST", "0.0.0.0"),
             port=int(os.environ.get("WEBHOOK_PORT", "8080")),
@@ -173,6 +184,8 @@ class Settings:
             acp_denied_tools=_env_list("ACP_DENIED_TOOLS"),
             acp_trace_enabled=_env_bool("ACP_TRACE_ENABLED", True),
             acp_harness_log_level=harness_log_level,
+            acp_trace_root=os.environ.get("ACP_TRACE_ROOT", "").strip(),
+            acp_trace_keep_runs=trace_keep_runs,
             sandbox_enabled=sandbox_enabled,
             sandbox_api_url=sandbox_api_url,
             sandbox_branch=os.environ.get("SANDBOX_BRANCH", "development").strip()
