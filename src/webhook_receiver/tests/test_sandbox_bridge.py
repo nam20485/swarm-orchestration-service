@@ -196,6 +196,11 @@ class TestSettingsParsing:
         monkeypatch.setenv("SANDBOX_BRANCH", "dev/phase4")
         monkeypatch.setenv("SANDBOX_READY_TIMEOUT", "42")
         monkeypatch.setenv("SANDBOX_DOCKER_BIN", "/usr/bin/docker")
+        # SANDBOX_ENABLED is set here; clear the clone root so an ambient
+        # ACP_CLONE_ROOT (the host-run service exports one) can't trip the
+        # boot exclusivity check and fail this test for reasons it doesn't
+        # assert.
+        monkeypatch.delenv("ACP_CLONE_ROOT", raising=False)
         settings = Settings.from_env()
         assert settings.sandbox_enabled is True
         assert settings.sandbox_api_url == "http://sbx:5000/"
