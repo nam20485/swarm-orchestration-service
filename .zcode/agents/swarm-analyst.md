@@ -2,7 +2,7 @@
 name: "swarm-analyst"
 description: "Post-wave swarm telemetry analyst: parses subagent session logs (metadata.json + model-io JSONL), records per-agent metrics into docs/swarm-metrics.md, and reports anomalies (wasted tool calls, thinking leakage, retry loops, contention) for the orchestrator to act on. Read-only plus Bash; writes only the metrics doc."
 color: cyan
-model: "builtin:zai-coding-plan/GLM-5.3-Flash"
+model: "account:zai-individual-coding-plan/GLM-5.3-Flash"
 thoughtLevel: off
 injectAgentsMd: false
 tools: [Read, Grep, Glob, Bash]
