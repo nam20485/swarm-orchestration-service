@@ -33,6 +33,14 @@ Other ``session/update`` kinds (plan deltas, mode changes, thought chunks,
 available commands) are consumed and ignored — extend the mapping here if
 the dashboard needs them.
 
+**Harness trace (``docs/plans/harness-trace-parity.md`` D1/D2/D7):** the agent
+is spawned with ``--print-logs --log-level <ACP_HARNESS_LOG_LEVEL>`` so its own
+log stream — model calls, loop steps, context/skill loading — arrives on stderr
+while stdout stays the JSON-RPC channel, and ``drain_stderr`` surfaces each line
+at INFO with a ``[harness]`` label so journald is the single interleaved pane.
+``ACP_TRACE_ENABLED=false`` drops the flags and drains stderr silently at DEBUG;
+nothing else changes.
+
 **Prompt seam (Phase 3):** the envelope's own ``prompt`` wins when present —
 the listener fills it with the open-ended orchestration prompt at enqueue
 time (``prompt_builder.build_orchestration_prompt``). The derived
@@ -252,6 +260,7 @@ class AcpHost:
         client = HostClient(self._settings, self._store, run_id=info.id)
         step = self._settings.acp_step_timeout
         prompt_timeout = self._settings.acp_prompt_timeout
+        trace_enabled = self._settings.acp_trace_enabled
         response: Any = None
         session_id: str | None = None
         conn: Any = None
@@ -262,20 +271,33 @@ class AcpHost:
             stream = proc.stderr if proc is not None else None
             if stream is None:
                 return
+            # The harness's own log stream (opencode ``--print-logs`` writes to
+            # stderr) is the detail the event contract does not carry, so it is
+            # surfaced at INFO — journald is the single pane (D1/D2). With
+            # trace capture off it stays a DEBUG drain: read so the pipe never
+            # blocks, not published.
+            log = logger.info if trace_enabled else logger.debug
             while True:
                 line = await stream.readline()
                 if not line:
                     return
-                logger.debug(
-                    "opencode stderr run_id=%s: %s",
+                log(
+                    "[harness] run_id=%s: %s",
                     info.id,
                     _REDACT_RE.sub(r"\1<redacted>", line.decode(errors="replace").rstrip()),
                 )
 
         try:
+            agent_args = ["acp", "--cwd", str(workspace)]
+            if trace_enabled:
+                agent_args += [
+                    "--print-logs",
+                    "--log-level",
+                    self._settings.acp_harness_log_level,
+                ]
             async with asyncio.timeout(step * 3 + prompt_timeout):
                 async with spawn_agent_process(
-                    client, bin_path, "acp", "--cwd", str(workspace)
+                    client, bin_path, *agent_args
                 ) as (conn, proc):
                     drainer = asyncio.create_task(drain_stderr())
                     init = await asyncio.wait_for(

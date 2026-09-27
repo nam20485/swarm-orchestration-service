@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -370,6 +371,88 @@ class TestRunHappyPath:
         result = asyncio.run(AcpHost(cfg, EventStore()).run(make_info()))
 
         assert result.stop_reason == "refusal"
+
+
+class TestHarnessTrace:
+    """S1 — the harness log tap (docs/plans/harness-trace-parity.md D1/D7)."""
+
+    def test_spawn_requests_print_logs_at_info_by_default(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        cfg = make_settings(tmp_path)
+        conn, proc, calls = FakeConn(), FakeProc(), []
+        install_spawn(monkeypatch, conn, proc, calls)
+
+        asyncio.run(AcpHost(cfg, EventStore()).run(make_info()))
+
+        args = calls[0][2]
+        assert args[:2] == ("acp", "--cwd")
+        assert args[3:] == ("--print-logs", "--log-level", "INFO")
+
+    def test_harness_log_level_setting_reaches_the_spawn(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        cfg = make_settings(tmp_path, acp_harness_log_level="DEBUG")
+        conn, proc, calls = FakeConn(), FakeProc(), []
+        install_spawn(monkeypatch, conn, proc, calls)
+
+        asyncio.run(AcpHost(cfg, EventStore()).run(make_info()))
+
+        assert calls[0][2][3:] == ("--print-logs", "--log-level", "DEBUG")
+
+    def test_trace_disabled_spawns_no_log_flags(self, tmp_path, monkeypatch) -> None:
+        cfg = make_settings(tmp_path, acp_trace_enabled=False)
+        conn, proc, calls = FakeConn(), FakeProc(), []
+        install_spawn(monkeypatch, conn, proc, calls)
+
+        asyncio.run(AcpHost(cfg, EventStore()).run(make_info()))
+
+        args = calls[0][2]
+        assert args[:2] == ("acp", "--cwd")
+        assert len(args) == 3  # no --print-logs / --log-level
+
+    def test_stderr_surfaced_at_info_with_harness_label(
+        self, tmp_path, monkeypatch, caplog
+    ) -> None:
+        cfg = make_settings(tmp_path)
+        conn, calls = FakeConn(), []
+        proc = FakeProc(stderr_text="message=loop session.id=ses-1 step=2\n")
+        install_spawn(monkeypatch, conn, proc, calls)
+
+        with caplog.at_level("INFO", logger="webhook_receiver.acp_host"):
+            asyncio.run(AcpHost(cfg, EventStore()).run(make_info()))
+
+        harness = [r for r in caplog.records if "[harness]" in r.getMessage()]
+        assert harness, "the harness line never reached the logger"
+        assert all(r.levelno == logging.INFO for r in harness)
+        assert "message=loop session.id=ses-1 step=2" in harness[0].getMessage()
+
+    def test_trace_disabled_keeps_stderr_at_debug(
+        self, tmp_path, monkeypatch, caplog
+    ) -> None:
+        cfg = make_settings(tmp_path, acp_trace_enabled=False)
+        conn, calls = FakeConn(), []
+        proc = FakeProc(stderr_text="message=loop step=2\n")
+        install_spawn(monkeypatch, conn, proc, calls)
+
+        with caplog.at_level("DEBUG", logger="webhook_receiver.acp_host"):
+            asyncio.run(AcpHost(cfg, EventStore()).run(make_info()))
+
+        harness = [r for r in caplog.records if "[harness]" in r.getMessage()]
+        assert harness, "stderr must still be drained when trace capture is off"
+        assert all(r.levelno == logging.DEBUG for r in harness)
+
+    def test_harness_lines_are_redacted(self, tmp_path, monkeypatch, caplog) -> None:
+        cfg = make_settings(tmp_path)
+        conn, calls = FakeConn(), []
+        proc = FakeProc(stderr_text="connecting token=supersecret ok\n")
+        install_spawn(monkeypatch, conn, proc, calls)
+
+        with caplog.at_level("INFO", logger="webhook_receiver.acp_host"):
+            asyncio.run(AcpHost(cfg, EventStore()).run(make_info()))
+
+        assert "supersecret" not in caplog.text
+        assert "token=<redacted>" in caplog.text
 
 
 class TestCloneRootWorkspace:

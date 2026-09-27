@@ -26,6 +26,11 @@ def _env_list(name: str) -> tuple[str, ...]:
     return tuple(item.strip() for item in raw.split(",") if item.strip())
 
 
+# ``opencode acp --log-level`` choices — the harness trace tap
+# (docs/plans/harness-trace-parity.md D1).
+_HARNESS_LOG_LEVELS = ("DEBUG", "INFO", "WARN", "ERROR")
+
+
 @dataclass(frozen=True)
 class Settings:
     """Listener settings (trimmed port of the old orchestrator-service config).
@@ -71,6 +76,15 @@ class Settings:
     # ``permission`` config (belt-and-braces; opencode removes the tool
     # entirely — spikes/acp/README.md deny-config finding).
     acp_denied_tools: tuple[str, ...] = ()
+    # --- Harness trace (docs/plans/harness-trace-parity.md D1/D7) ---
+    # Spawn the agent with ``--print-logs --log-level <acp_harness_log_level>``
+    # so its own log stream (model calls, loop steps, context/skill loading)
+    # reaches the host on stderr — stdout stays the JSON-RPC channel — and
+    # surface it at INFO with a ``[harness]`` label. False drains stderr
+    # silently at DEBUG; no other behaviour changes.
+    acp_trace_enabled: bool = True
+    # One of ``opencode --log-level``'s choices; validated at boot.
+    acp_harness_log_level: str = "INFO"
     # --- SwarmSandbox bridge (Phase 4, plan §5 Decision 5) ---
     # Off by default: the Phase 2 plain scratch-dir workspace is kept, so CI
     # and dockerless local dev are unaffected. When enabled, the session cwd
@@ -130,6 +144,15 @@ class Settings:
         if events_keepalive <= 0:
             raise ValueError("WEBHOOK_EVENTS_KEEPALIVE must be a positive number.")
 
+        harness_log_level = (
+            os.environ.get("ACP_HARNESS_LOG_LEVEL", "INFO").strip().upper() or "INFO"
+        )
+        if harness_log_level not in _HARNESS_LOG_LEVELS:
+            raise ValueError(
+                "ACP_HARNESS_LOG_LEVEL must be one of: "
+                + ", ".join(_HARNESS_LOG_LEVELS)
+            )
+
         return cls(
             host=os.environ.get("WEBHOOK_HOST", "0.0.0.0"),
             port=int(os.environ.get("WEBHOOK_PORT", "8080")),
@@ -148,6 +171,8 @@ class Settings:
             acp_default_permission=default_permission,
             acp_deny_patterns=deny_patterns,
             acp_denied_tools=_env_list("ACP_DENIED_TOOLS"),
+            acp_trace_enabled=_env_bool("ACP_TRACE_ENABLED", True),
+            acp_harness_log_level=harness_log_level,
             sandbox_enabled=sandbox_enabled,
             sandbox_api_url=sandbox_api_url,
             sandbox_branch=os.environ.get("SANDBOX_BRANCH", "development").strip()
