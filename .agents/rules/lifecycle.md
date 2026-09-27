@@ -113,3 +113,25 @@ each harness's native frontmatter. Model pins in the ports
 (`zai-coding-plan/glm-5.3-flash` workers, `qwencloud/qwen3.8-max` king)
 are stripped at clone-mint time by `strip-model-settings.ps1`, per plan
 Decision 10.
+
+### Frontmatter mapping (ZCode ↔ opencode)
+
+Verified 2026-09-27 against `.zcode/agents/swarm-orchestrator.md`,
+`.opencode/agents/swarm-orchestrator.md`, `opencode debug agent
+swarm-orchestrator` and the published `https://opencode.ai/config.json`
+(`AgentConfig` keys). The harnesses are **not** field-for-field: parity is by
+effect, and one side may satisfy it in host config rather than in the repo
+file.
+
+| Intent | ZCode (repo file) | opencode |
+| --- | --- | --- |
+| Model pin | `model: 91b0a8e2-…/qwen3.8-max` (king); `model: "custom:builtin%3Azai-coding-plan:GLM-5.3-Flash"` (workers) | `model: qwencloud/qwen3.8-max` / `zai-coding-plan/glm-5.3-flash`. Resolve with `opencode debug agent <name>` → `model.providerID` / `model.modelID` |
+| Reasoning depth | `thoughtLevel: xhigh` (king), `off` (workers) | **No agent-level field.** `AgentConfig` offers only `variant`, and no variant is declared for these providers. The king's `xhigh` is satisfied in host config: `~/.config/opencode/opencode.jsonc` defines provider `qwencloud` → `qwen3.8-max` with `options.thinking = {type: enabled, budgetTokens: 99072, reasoning_effort: "xhigh"}` and `temperature: 0.6` |
+| Project instructions | `injectAgentsMd: true` or `false` | Unconditional — AGENTS.md is always loaded and no knob exists, so `true` needs no counterpart and `false` cannot be expressed (the ports say "workers run without the project instructions" in prose instead) |
+| Spawning workers | Agent tool, `run_in_background: true`, `TaskOutput` / `TaskStop` | `task` tool with the agent type named; the tool's own cancellation |
+
+Consequence: a ZCode-only frontmatter change (model id syntax, `thoughtLevel`,
+`injectAgentsMd`) can already be at parity on the opencode side with **no edit**
+to `.opencode/agents/`. Read the resolved opencode config before porting, and
+record the asymmetry here rather than inventing a field — unknown frontmatter
+keys are silently routed into `options` and do nothing.
