@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -56,6 +57,9 @@ def make_settings(tmp_path: Path, **acp: object) -> Settings:
         "acp_step_timeout": 1.0,
         "acp_prompt_timeout": 1.0,
         "acp_opencode_bin": "opencode-test-stub",
+        # Keep trace artifacts inside tmp_path: the default root is relative to
+        # the cwd, which would write into the repo's own logs/ tree.
+        "acp_trace_root": str(tmp_path / "trace"),
     }
     params.update(acp)
     return Settings(**params)  # type: ignore[arg-type]
@@ -370,6 +374,160 @@ class TestRunHappyPath:
         result = asyncio.run(AcpHost(cfg, EventStore()).run(make_info()))
 
         assert result.stop_reason == "refusal"
+
+
+class TestHarnessTrace:
+    """S1 — the harness log tap (docs/plans/harness-trace-parity.md D1/D7)."""
+
+    def test_spawn_requests_print_logs_at_info_by_default(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        cfg = make_settings(tmp_path)
+        conn, proc, calls = FakeConn(), FakeProc(), []
+        install_spawn(monkeypatch, conn, proc, calls)
+
+        asyncio.run(AcpHost(cfg, EventStore()).run(make_info()))
+
+        args = calls[0][2]
+        assert args[:2] == ("acp", "--cwd")
+        assert args[3:] == ("--print-logs", "--log-level", "INFO")
+
+    def test_harness_log_level_setting_reaches_the_spawn(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        cfg = make_settings(tmp_path, acp_harness_log_level="DEBUG")
+        conn, proc, calls = FakeConn(), FakeProc(), []
+        install_spawn(monkeypatch, conn, proc, calls)
+
+        asyncio.run(AcpHost(cfg, EventStore()).run(make_info()))
+
+        assert calls[0][2][3:] == ("--print-logs", "--log-level", "DEBUG")
+
+    def test_trace_disabled_spawns_no_log_flags(self, tmp_path, monkeypatch) -> None:
+        cfg = make_settings(tmp_path, acp_trace_enabled=False)
+        conn, proc, calls = FakeConn(), FakeProc(), []
+        install_spawn(monkeypatch, conn, proc, calls)
+
+        asyncio.run(AcpHost(cfg, EventStore()).run(make_info()))
+
+        args = calls[0][2]
+        assert args[:2] == ("acp", "--cwd")
+        assert len(args) == 3  # no --print-logs / --log-level
+
+    def test_stderr_surfaced_at_info_with_harness_label(
+        self, tmp_path, monkeypatch, caplog
+    ) -> None:
+        cfg = make_settings(tmp_path)
+        conn, calls = FakeConn(), []
+        proc = FakeProc(stderr_text="message=loop session.id=ses-1 step=2\n")
+        install_spawn(monkeypatch, conn, proc, calls)
+
+        with caplog.at_level("INFO", logger="webhook_receiver.acp_host"):
+            asyncio.run(AcpHost(cfg, EventStore()).run(make_info()))
+
+        harness = [r for r in caplog.records if "[harness]" in r.getMessage()]
+        assert harness, "the harness line never reached the logger"
+        assert all(r.levelno == logging.INFO for r in harness)
+        assert "message=loop session.id=ses-1 step=2" in harness[0].getMessage()
+
+    def test_trace_disabled_keeps_stderr_at_debug(
+        self, tmp_path, monkeypatch, caplog
+    ) -> None:
+        cfg = make_settings(tmp_path, acp_trace_enabled=False)
+        conn, calls = FakeConn(), []
+        proc = FakeProc(stderr_text="message=loop step=2\n")
+        install_spawn(monkeypatch, conn, proc, calls)
+
+        with caplog.at_level("DEBUG", logger="webhook_receiver.acp_host"):
+            asyncio.run(AcpHost(cfg, EventStore()).run(make_info()))
+
+        harness = [r for r in caplog.records if "[harness]" in r.getMessage()]
+        assert harness, "stderr must still be drained when trace capture is off"
+        assert all(r.levelno == logging.DEBUG for r in harness)
+
+    def test_harness_lines_are_redacted(self, tmp_path, monkeypatch, caplog) -> None:
+        cfg = make_settings(tmp_path)
+        conn, calls = FakeConn(), []
+        proc = FakeProc(stderr_text="connecting token=supersecret ok\n")
+        install_spawn(monkeypatch, conn, proc, calls)
+
+        with caplog.at_level("INFO", logger="webhook_receiver.acp_host"):
+            asyncio.run(AcpHost(cfg, EventStore()).run(make_info()))
+
+        assert "supersecret" not in caplog.text
+        assert "token=<redacted>" in caplog.text
+
+    def test_run_writes_trace_artifacts(self, tmp_path, monkeypatch) -> None:
+        """S2: one run leaves harness.log + manifest.json under the trace root."""
+        cfg = make_settings(tmp_path)
+        conn, calls = FakeConn(), []
+        proc = FakeProc(stderr_text="message=loop step=0\nmessage=stream modelID=x\n")
+        install_spawn(monkeypatch, conn, proc, calls)
+        info = make_info()
+
+        asyncio.run(AcpHost(cfg, EventStore()).run(info))
+
+        run_dir = tmp_path / "trace" / info.id
+        lines = (run_dir / "harness.log").read_text(encoding="utf-8").splitlines()
+        assert lines == ["message=loop step=0", "message=stream modelID=x"]
+
+        manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+        assert manifest["run_id"] == info.id
+        assert manifest["delivery_id"] == "d-1"
+        assert manifest["repo"] == "owner/repo"
+        assert manifest["label"] == "orchestration:plan"
+        assert manifest["session_id"] == "sess-1"
+        assert manifest["ok"] is True
+        assert manifest["stop_reason"] == "end_turn"
+        assert manifest["started_at"] and manifest["ended_at"]
+        assert manifest["workspace"]  # the session cwd, for joining back
+
+    def test_trace_disabled_writes_no_artifacts(self, tmp_path, monkeypatch) -> None:
+        cfg = make_settings(tmp_path, acp_trace_enabled=False)
+        conn, calls = FakeConn(), []
+        proc = FakeProc(stderr_text="message=loop step=0\n")
+        install_spawn(monkeypatch, conn, proc, calls)
+
+        asyncio.run(AcpHost(cfg, EventStore()).run(make_info()))
+
+        assert not (tmp_path / "trace").exists()
+
+    def test_failed_run_records_the_error_in_the_manifest(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        cfg = make_settings(tmp_path)
+        conn, calls = FakeConn(prompt_exc=RuntimeError("boom")), []
+        proc = FakeProc(stderr_text="message=loop step=0\n")
+        install_spawn(monkeypatch, conn, proc, calls)
+        info = make_info()
+
+        with pytest.raises(AcpHostError):
+            asyncio.run(AcpHost(cfg, EventStore()).run(info))
+
+        run_dir = tmp_path / "trace" / info.id
+        manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+        assert manifest["ok"] is False
+        assert "boom" in manifest["error"]
+        assert manifest["ended_at"]
+        # The lines written before the failure survive.
+        assert (run_dir / "harness.log").read_text(encoding="utf-8").startswith(
+            "message=loop step=0"
+        )
+
+    def test_harness_log_file_is_redacted(self, tmp_path, monkeypatch) -> None:
+        cfg = make_settings(tmp_path)
+        conn, calls = FakeConn(), []
+        proc = FakeProc(stderr_text="connecting token=supersecret ok\n")
+        install_spawn(monkeypatch, conn, proc, calls)
+        info = make_info()
+
+        asyncio.run(AcpHost(cfg, EventStore()).run(info))
+
+        text = (tmp_path / "trace" / info.id / "harness.log").read_text(
+            encoding="utf-8"
+        )
+        assert "supersecret" not in text
+        assert "token=<redacted>" in text
 
 
 class TestCloneRootWorkspace:
