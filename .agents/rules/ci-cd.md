@@ -23,3 +23,5 @@ Every `uses:` line in workflow files **MUST** reference the full 40-char commit 
 - Trailing `# vX.Y.Z` comment is mandatory for readability.
 - Applies to all actions: third-party, `actions/*`, `github/*`, and reusable workflows.
 - Not enforced by `actionlint` — enforced by code review and agent discipline.
+
+<!-- canary: rust-tern-1 -->

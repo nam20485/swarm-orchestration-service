@@ -80,3 +80,5 @@ When your changes create orphans:
 - Remove imports, variables, and functions that YOUR changes made unused.
 - Don't remove pre-existing dead code unless asked.
 - Every changed line should trace directly to the user's request.
+
+<!-- canary: saffron-mole-6 -->

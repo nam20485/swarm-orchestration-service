@@ -52,3 +52,5 @@ The skill's whole job should still be reproducible from its directory alone — 
 ## Progressive disclosure
 
 Skills load progressively: metadata (~100 tokens) at startup, then the full `SKILL.md` body on activation, then `scripts/`/`references/`/`assets/` only when the task calls for them. Keep `SKILL.md` under 500 lines; push detail into referenced files one level deep from `SKILL.md`.
+
+<!-- canary: teal-lemur-2 -->

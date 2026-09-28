@@ -36,3 +36,5 @@ pwsh ./scripts/update-remote-indices.ps1
 ```
 
 The script fetches the remote directory listings, rebuilds both index files, and writes only if the content changed.
+
+<!-- canary: mauve-marten-7 -->

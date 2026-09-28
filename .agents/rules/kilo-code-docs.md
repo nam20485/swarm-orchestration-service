@@ -13,3 +13,5 @@ Decision points:
 - Known page path (or one discovered from `llms.txt`) → fetch just that page via the raw-markdown API to save context.
 
 Source: [docs/using-docs-with-agents.md](../../docs/using-docs-with-agents.md)
+
+<!-- canary: copper-shrike-19 -->
