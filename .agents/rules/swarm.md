@@ -52,3 +52,5 @@ The Z.AI servers (`web-reader`, `web-search-prime`, `zread`) are granted to `swa
 ## Skill self-containment exception
 
 The swarm skill's orchestrator protocol intentionally lives at the agent-definition discovery path `.zcode/agents/swarm-orchestrator.md`; this is the documented exception to skill self-containment (`.agents/rules/skills.md`) — agent definitions must live at their discovery path, and duplicating the protocol in the skill would drift.
+
+<!-- canary: azure-magpie-12 -->

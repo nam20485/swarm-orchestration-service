@@ -50,3 +50,5 @@ No board path in your task input = you are the sole writer; skip this section en
 ## Note discipline
 
 Field-guide notes are one line each (`swarm-state.ps1 append-note` collapses newlines, but compose single-line notes anyway): one durable finding per note, no narration.
+
+<!-- canary: olive-siskin-5 -->

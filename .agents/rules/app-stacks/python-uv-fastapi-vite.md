@@ -63,3 +63,5 @@ Python
 ### CI
 
 - GHA workflows
+
+<!-- canary: lilac-finch-10 -->

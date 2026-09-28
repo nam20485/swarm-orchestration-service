@@ -152,3 +152,5 @@ is itself the signal that it failed before any model call.
   die at spawn. Check ZCode's MCP connection state before the next swarm.
 - `.agents/memory.md:55` needs correcting once the level decision is made (its "drop it" remedy
   yields `max`).
+
+<!-- canary: ebony-wigeon-8 -->

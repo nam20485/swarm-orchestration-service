@@ -145,3 +145,5 @@ Standard layout:
 - **Root is `/tmp/kilo/`** — the bash tool's pre-approved external-work directory. Scratch goes **under** it (not directly under `/tmp/<slug>/`), so there is no external-dir approval prompt and no collision with the OS `/tmp`.
 - **Create on demand** (`mkdir -p` / `New-Item -ItemType Directory -Force`). Never assume a previous run's scratch belongs to the current one — before reusing anything under `/tmp/kilo/`, confirm the slug matches the current repo.
 - **Durable artifacts are not scratch.** Trace logs worth keeping, fix write-ups, and decision records go under `docs/plans/`, not `/tmp/kilo/`.
+
+<!-- canary: auburn-heron-11 -->

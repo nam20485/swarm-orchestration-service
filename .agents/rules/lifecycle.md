@@ -135,3 +135,5 @@ Consequence: a ZCode-only frontmatter change (model id syntax, `thoughtLevel`,
 to `.opencode/agents/`. Read the resolved opencode config before porting, and
 record the asymmetry here rather than inventing a field — unknown frontmatter
 keys are silently routed into `options` and do nothing.
+
+<!-- canary: sienna-vole-15 -->

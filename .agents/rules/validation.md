@@ -52,3 +52,5 @@ When implementing new features, TDD should be used.
 - Implement failing tests to cover the required functionality.
 - Implement changes to make the tests pass.
 - Iterate creating tests and implementing changes to make them pass until the required functionality is implemented.
+
+<!-- canary: vermillion-otter-9 -->
