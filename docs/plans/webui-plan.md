@@ -29,14 +29,14 @@ blacklist was to be reintroduced.
 
 ### But the current implementation does NOT forward all traces
 
-`acp_host.py` maps only **4 of the 12** `session_update` kinds in the pinned
+`acp_host.py` maps only **4 of the 13** `session_update` kinds in the pinned
 `agent-client-protocol` SDK into events:
 
 | Mapped today → event | Dropped today (logged, not emitted) |
 |---|---|
 | `agent_message_chunk` → `agent_message_chunk` | `user_message_chunk` (the prompt echo) |
 | `tool_call`, `tool_call_update` → `agent_tool_call` | `agent_thought_chunk` |
-| `usage_update` → `agent_usage` | `plan_update`, `plan_removed` |
+| `usage_update` → `agent_usage` | `plan` (full snapshot), `plan_update`, `plan_removed` |
 | | `available_commands_update`, `current_mode_update`, `session_info_update`, `config_option_update` |
 
 The `acp_host.py` module docstring says so explicitly: plan deltas, mode
@@ -92,7 +92,7 @@ sandbox lifecycle — a different concern, .NET backend).
 
 **Relationship to `harness-trace-parity` S4** (same function, two plans):
 S4's event half ("recover the agent's voice" — thought chunks + plan deltas
-into the event stream) is subsumed by W0, which maps **all 12** kinds. When
+into the event stream) is subsumed by W0, which maps **all 13** kinds. When
 executing both plans, W0 is the superset implementation of the widening: land
 W0 first (or as the same branch), take S4's unique remainder — rendering
 thought/plan into `harness.log` in the golden style (`[acp] Thinking: …`) —
@@ -105,7 +105,8 @@ Backend-first, three small phases, each its own PR:
 
 1. **W0 — ALL-traces contract widening** (no UI): `acp_host.session_update`
    forwards **every** kind. Known kinds get typed events (`agent_thought_chunk`,
-   `agent_plan` for `plan_update`/`plan_removed`, `agent_commands_update`,
+   `agent_plan`/`agent_plan_update`/`agent_plan_removed` for the three plan
+   kinds, `agent_commands_update`,
    `agent_mode_update`, `agent_session_info`, `agent_config_update`,
    `user_message_chunk`); anything unrecognized emits a generic `agent_update`
    passthrough (`kind` + full JSON-safe payload) so unknown kinds are never
@@ -185,7 +186,7 @@ its own enable flag rather than riding `ACP_TRACE_ENABLED`:
 
 Every phase PR runs the full `validation.ps1` gate (build → scan → test;
 coverage stays > 85%). W0's mapping is unit-tested through the duck-typed
-client callbacks (all 12 kinds + one synthetic unknown kind); the SSE tests
+client callbacks (all 13 kinds + one synthetic unknown kind); the SSE tests
 bind a real uvicorn on an ephemeral port (starlette TestClient deadlocks on
 infinite SSE — house gotcha). The e2e simulator's `/events` assertions grow
 with any new event names it can observe.
