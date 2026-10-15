@@ -87,6 +87,10 @@ Every knob is an environment variable parsed in
 | `ACP_DEFAULT_PERMISSION` | `reject` | action for unclassified permission requests: `reject` (headless-safe) or `allow_once` |
 | `ACP_DENY_PATTERNS` | *(empty)* | comma-separated regexes (case-insensitive) that always reject a permission request; validated at boot |
 | `ACP_DENIED_TOOLS` | *(empty)* | tools denied pre-prompt via the workspace `opencode.json` permission config (bare workspaces only — never written into an `ACP_CLONE_ROOT` checkout) |
+| `ACP_TRACE_ENABLED` | `true` | spawn opencode with `--print-logs --log-level` so its own log stream reaches the host (`[harness]` lines at INFO); `false` drains stderr silently at DEBUG |
+| `ACP_HARNESS_LOG_LEVEL` | `INFO` | one of opencode's `--log-level` choices (`DEBUG`, `INFO`, `WARN`, `ERROR`); validated at boot |
+| `ACP_TRACE_ROOT` | *(empty)* | per-run trace artifact root for `harness.log` + `manifest.json`; empty = `logs/runs` relative to the working directory (gitignored) |
+| `ACP_TRACE_KEEP_RUNS` | `50` | newest-N run directories kept, pruned when a run opens |
 | `SANDBOX_ENABLED` | `false` | provision session workspaces through the SwarmSandbox API; mutually exclusive with `ACP_CLONE_ROOT` |
 | `SANDBOX_API_URL` | *(required when enabled)* | SwarmSandbox API base URL; validated at boot |
 | `SANDBOX_BRANCH` | `development` | branch the sandbox clones into the workspace |
