@@ -193,6 +193,10 @@ class HostClient:
             text = getattr(getattr(update, "content", None), "text", None)
             if text:
                 emit(kind, run_id=run_id, text=text)
+            else:
+                # No/empty/non-text content (e.g. an image block): the update
+                # still happened, so it passes through rather than dropping.
+                emit("agent_update", run_id=run_id, kind=kind, payload=_json_safe(update))
             return
         if kind in ("tool_call", "tool_call_update"):
             emit(

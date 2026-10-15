@@ -799,7 +799,7 @@ class TestHostClientMapping:
         store = EventStore()
         return HostClient(make_settings(Path("/tmp")), store, run_id="run-1"), store
 
-    def test_message_chunk_without_text_ignored(self) -> None:
+    def test_chunk_without_text_passes_through_as_agent_update(self) -> None:
         client, store = self.make_client()
 
         async def main() -> None:
@@ -809,7 +809,8 @@ class TestHostClientMapping:
             )
 
         asyncio.run(main())
-        assert store.recent() == []
+        data = events_of_type(store, "agent_update")[0]["data"]
+        assert data["kind"] == "agent_message_chunk"  # never silently dropped
 
     def test_user_and_thought_chunks_emit_with_text(self) -> None:
         client, store = self.make_client()
