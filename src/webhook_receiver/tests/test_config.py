@@ -39,6 +39,7 @@ class TestFromEnv:
             "ACP_TRACE_ROOT",
             "ACP_TRACE_KEEP_RUNS",
             "WEBHOOK_EVENTS_KEEPALIVE",
+            "WEBHOOK_EVENTS_MAXLEN",
         ):
             monkeypatch.delenv(name, raising=False)
         cfg = Settings.from_env()
@@ -67,6 +68,7 @@ class TestFromEnv:
         assert cfg.acp_trace_keep_runs == 50
         # Dashboard SSE (Phase 5).
         assert cfg.events_keepalive == 15.0
+        assert cfg.events_maxlen == 1000
 
     def test_env_overrides(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("OS_WEBHOOK_SECRET", "FAKE-WEBHOOK-SECRET-FOR-TESTING")
@@ -88,6 +90,16 @@ class TestFromEnv:
         assert Settings.from_env().events_keepalive == 2.5
         monkeypatch.setenv("WEBHOOK_EVENTS_KEEPALIVE", "0")
         with pytest.raises(ValueError, match="WEBHOOK_EVENTS_KEEPALIVE"):
+            Settings.from_env()
+
+    def test_events_maxlen_override_and_validation(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("OS_WEBHOOK_SECRET", "FAKE-WEBHOOK-SECRET-FOR-TESTING")
+        monkeypatch.setenv("WEBHOOK_EVENTS_MAXLEN", "5000")
+        assert Settings.from_env().events_maxlen == 5000
+        monkeypatch.setenv("WEBHOOK_EVENTS_MAXLEN", "0")
+        with pytest.raises(ValueError, match="WEBHOOK_EVENTS_MAXLEN"):
             Settings.from_env()
 
 

@@ -13,15 +13,29 @@ import logging
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from acp.schema import (
     AgentMessageChunk,
+    AgentPlanContentUpdate,
+    AgentPlanRemovedUpdate,
+    AgentPlanUpdate,
+    AgentThoughtChunk,
+    AvailableCommand,
+    AvailableCommandsUpdate,
+    ConfigOptionUpdate,
+    CurrentModeUpdate,
     PermissionOption,
+    PlanEntry,
+    PlanUpdateItems,
+    SessionConfigOptionBoolean,
+    SessionInfoUpdate,
     TextContentBlock,
     ToolCallProgress,
     ToolCallStart,
     UsageUpdate,
+    UserMessageChunk,
 )
 
 import webhook_receiver.acp_host as acp_host_module
@@ -797,15 +811,195 @@ class TestHostClientMapping:
         asyncio.run(main())
         assert store.recent() == []
 
-    def test_unmapped_kinds_ignored(self) -> None:
+    def test_user_and_thought_chunks_emit_with_text(self) -> None:
         client, store = self.make_client()
 
         async def main() -> None:
-            for kind in ("plan", "available_commands_update", "current_mode_update"):
-                await client.session_update("s", SimpleNamespace(session_update=kind))
+            await client.session_update(
+                "s",
+                UserMessageChunk(
+                    session_update="user_message_chunk",
+                    content=TextContentBlock(type="text", text="the prompt"),
+                ),
+            )
+            await client.session_update(
+                "s",
+                AgentThoughtChunk(
+                    session_update="agent_thought_chunk",
+                    content=TextContentBlock(type="text", text="reasoning"),
+                ),
+            )
 
         asyncio.run(main())
-        assert store.recent() == []
+        user = events_of_type(store, "user_message_chunk")[0]["data"]
+        thought = events_of_type(store, "agent_thought_chunk")[0]["data"]
+        assert user == {"run_id": "run-1", "text": "the prompt"}
+        assert thought == {"run_id": "run-1", "text": "reasoning"}
+
+    def test_plan_kinds_emit_wire_shaped_payloads(self) -> None:
+        client, store = self.make_client()
+        entry = PlanEntry(content="write plan", priority="high", status="pending")
+
+        async def main() -> None:
+            await client.session_update(
+                "s", AgentPlanUpdate(session_update="plan", entries=[entry])
+            )
+            await client.session_update(
+                "s",
+                AgentPlanContentUpdate(
+                    session_update="plan_update",
+                    plan=PlanUpdateItems(
+                        plan_id="p-1", entries=[entry], type="items"
+                    ),
+                ),
+            )
+            await client.session_update(
+                "s",
+                AgentPlanRemovedUpdate(
+                    session_update="plan_removed", plan_id="p-1"
+                ),
+            )
+
+        asyncio.run(main())
+        plan = events_of_type(store, "agent_plan")[0]["data"]
+        update = events_of_type(store, "agent_plan_update")[0]["data"]
+        removed = events_of_type(store, "agent_plan_removed")[0]["data"]
+        assert plan["entries"] == [
+            {
+                "content": "write plan",
+                "priority": "high",
+                "status": "pending",
+                "_meta": None,
+            }
+        ]
+        assert update["plan"]["planId"] == "p-1"  # wire field names, one-to-one
+        assert update["plan"]["type"] == "items"
+        assert removed["plan_id"] == "p-1"
+
+    def test_commands_mode_session_info_config_emit(self) -> None:
+        client, store = self.make_client()
+
+        async def main() -> None:
+            await client.session_update(
+                "s",
+                AvailableCommandsUpdate(
+                    session_update="available_commands_update",
+                    available_commands=[
+                        AvailableCommand(name="research_codebase", description="d")
+                    ],
+                ),
+            )
+            await client.session_update(
+                "s",
+                CurrentModeUpdate(
+                    session_update="current_mode_update", current_mode_id="build"
+                ),
+            )
+            await client.session_update(
+                "s",
+                SessionInfoUpdate(
+                    session_update="session_info_update",
+                    title="t1",
+                    updated_at="2026-10-15T00:00:00Z",
+                ),
+            )
+            await client.session_update(
+                "s",
+                ConfigOptionUpdate(
+                    session_update="config_option_update",
+                    config_options=[
+                        SessionConfigOptionBoolean(
+                            id="opt-1",
+                            name="Opt",
+                            value=True,
+                            currentValue=True,
+                            type="boolean",
+                        )
+                    ],
+                ),
+            )
+
+        asyncio.run(main())
+        commands = events_of_type(store, "agent_commands_update")[0]["data"]
+        mode = events_of_type(store, "agent_mode_update")[0]["data"]
+        info = events_of_type(store, "agent_session_info")[0]["data"]
+        config = events_of_type(store, "agent_config_update")[0]["data"]
+        assert commands["commands"][0]["name"] == "research_codebase"
+        assert mode["mode_id"] == "build"
+        assert info == {
+            "run_id": "run-1",
+            "title": "t1",
+            "updated_at": "2026-10-15T00:00:00Z",
+        }
+        assert config["options"][0]["id"] == "opt-1"
+
+    def test_unknown_kind_passes_through_as_agent_update(self) -> None:
+        client, store = self.make_client()
+
+        async def main() -> None:
+            await client.session_update(
+                "s", SimpleNamespace(session_update="future_kind", custom=1)
+            )
+
+        asyncio.run(main())
+        data = events_of_type(store, "agent_update")[0]["data"]
+        assert data["run_id"] == "run-1"
+        assert data["kind"] == "future_kind"
+        assert "payload" in data  # never dropped, always inspectable
+
+    _EXPECTED_EVENTS = {
+        "user_message_chunk": "user_message_chunk",
+        "agent_message_chunk": "agent_message_chunk",
+        "agent_thought_chunk": "agent_thought_chunk",
+        "tool_call": "agent_tool_call",
+        "tool_call_update": "agent_tool_call",
+        "usage_update": "agent_usage",
+        "plan": "agent_plan",
+        "plan_update": "agent_plan_update",
+        "plan_removed": "agent_plan_removed",
+        "available_commands_update": "agent_commands_update",
+        "current_mode_update": "agent_mode_update",
+        "session_info_update": "agent_session_info",
+        "config_option_update": "agent_config_update",
+    }
+
+    def test_every_sdk_kind_maps_to_a_typed_event(self) -> None:
+        client, store = self.make_client()
+
+        async def main() -> None:
+            for kind in self._EXPECTED_EVENTS:
+                update: Any = SimpleNamespace(session_update=kind)
+                if "chunk" in kind:  # chunk kinds carry their text on .content
+                    update.content = SimpleNamespace(text="x")
+                await client.session_update("s", update)
+
+        asyncio.run(main())
+        emitted = {item["type"] for item in store.recent()}
+        for kind, event in self._EXPECTED_EVENTS.items():
+            assert event in emitted, f"{kind} did not emit {event}"
+        assert "agent_update" not in emitted  # nothing fell through
+
+    def test_mapping_covers_the_pinned_sdk(self) -> None:
+        """ALL-traces drift guard: when the pinned SDK grows a new
+        ``session_update`` discriminator, this fails until the mapping is
+        taught (the new kind would otherwise arrive as ``agent_update``)."""
+        import typing
+
+        from acp import schema
+
+        kinds: set[str] = set()
+        for name in dir(schema):
+            cls = getattr(schema, name)
+            if not isinstance(cls, type):
+                continue
+            try:
+                hints = typing.get_type_hints(cls)
+            except Exception:
+                continue
+            for literal in typing.get_args(hints.get("session_update") or ()):
+                if isinstance(literal, str):
+                    kinds.add(literal)
+        assert kinds == set(self._EXPECTED_EVENTS)
 
     def test_request_permission_applies_policy_and_emits(self) -> None:
         client, store = self.make_client()

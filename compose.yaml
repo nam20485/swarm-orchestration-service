@@ -10,7 +10,8 @@
 #   OS_WEBHOOK_SECRET=<the GitHub App webhook secret>
 # Optional: WEBHOOK_SITE_ADDRESS (default :80) plus the listener knobs
 # forwarded below (WEBHOOK_LOG_LEVEL, WEBHOOK_MAX_BODY_BYTES,
-# WEBHOOK_EVENTS_KEEPALIVE, and DIRECT_BODY_ALLOWED_SENDERS — see
+# WEBHOOK_EVENTS_KEEPALIVE, WEBHOOK_EVENTS_MAXLEN, and
+# DIRECT_BODY_ALLOWED_SENDERS — see
 # .env.example. ACP_* and SANDBOX_* are host-run-only: the compose image
 # has no opencode and no docker, so agent sessions cannot run there
 # (ACP_ENABLED is pinned false below).
@@ -35,6 +36,7 @@ services:
         # Defaults below mirror src/webhook_receiver/config.py — keep in sync.
       - WEBHOOK_MAX_BODY_BYTES=${WEBHOOK_MAX_BODY_BYTES:-26214400}
       - WEBHOOK_EVENTS_KEEPALIVE=${WEBHOOK_EVENTS_KEEPALIVE:-15}
+      - WEBHOOK_EVENTS_MAXLEN=${WEBHOOK_EVENTS_MAXLEN:-1000}
       - DIRECT_BODY_ALLOWED_SENDERS=${DIRECT_BODY_ALLOWED_SENDERS:-}
     restart: unless-stopped
     security_opt:

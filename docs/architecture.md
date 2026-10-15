@@ -113,10 +113,11 @@ Two run modes matter operationally:
 
 ## Eventing
 
-Every step emits a named event into an in-process ring buffer (bounded 1000
-entries); `GET /events` streams the buffer over SSE with full replay on
-subscribe, live fan-out, and idle keepalives. The 15-event contract —
-`webhook_*`, `prompt_*`, `sandbox_*`, `agent_*` — is documented in the
+Every step emits a named event into an in-process ring buffer (bounded by
+`WEBHOOK_EVENTS_MAXLEN`, default 1000); `GET /events` streams the buffer over
+SSE with full replay on subscribe, live fan-out, and idle keepalives. The
+24-event contract — `webhook_*`, `prompt_*`, `sandbox_*`, `user_message_chunk`,
+`agent_*` — is documented in the
 `app.py` module docstring and summarized in
 [`src/webhook_receiver/README.md`](../src/webhook_receiver/README.md). This
 is the surface a dashboard consumes; none is built yet (the old stack's

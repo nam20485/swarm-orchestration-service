@@ -97,8 +97,9 @@ name, JSON `data`; `run_id` ties the agent events to the envelope):
 ```text
 webhook_received -> webhook_accepted -> prompt_queued
   -> [sandbox_provisioned]            # SANDBOX_ENABLED only
-  -> agent_session_started -> agent_tool_call / agent_message_chunk /
-     agent_permission / agent_usage   -> agent_finished
+  -> user_message_chunk (the prompt echo) -> agent_session_started
+  -> agent_tool_call / agent_message_chunk / agent_thought_chunk /
+     agent_plan* / agent_permission / agent_usage   -> agent_finished
   -> [sandbox_released] -> prompt_consumed {ok: true}
 ```
 

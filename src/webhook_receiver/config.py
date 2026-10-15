@@ -50,6 +50,11 @@ class Settings:
     # Idle seconds before GET /events emits a keepalive comment; must also
     # stay below any proxy read timeout in front of the listener.
     events_keepalive: float = 15.0
+    # Ring-buffer capacity of the event store. Every session/update kind is
+    # an event now (webui plan W0), so a busy run churns the ring with
+    # chunk/plan events; raise this if replay windows feel short. The W1
+    # per-run JSONL log is the durable record beyond the ring.
+    events_maxlen: int = 1000
     # --- ACP host (Phase 2) ---
     acp_enabled: bool = True
     # Empty → resolve via PATH, then ~/.opencode/bin/opencode.
@@ -151,6 +156,10 @@ class Settings:
         if events_keepalive <= 0:
             raise ValueError("WEBHOOK_EVENTS_KEEPALIVE must be a positive number.")
 
+        events_maxlen = int(os.environ.get("WEBHOOK_EVENTS_MAXLEN", "1000"))
+        if events_maxlen < 1:
+            raise ValueError("WEBHOOK_EVENTS_MAXLEN must be at least 1.")
+
         harness_log_level = (
             os.environ.get("ACP_HARNESS_LOG_LEVEL", "INFO").strip().upper() or "INFO"
         )
@@ -173,6 +182,7 @@ class Settings:
             ),
             log_level=os.environ.get("WEBHOOK_LOG_LEVEL", "info").lower(),
             events_keepalive=events_keepalive,
+            events_maxlen=events_maxlen,
             acp_enabled=_env_bool("ACP_ENABLED", True),
             acp_opencode_bin=os.environ.get("ACP_OPENCODE_BIN", "").strip(),
             acp_workspace_root=os.environ.get("ACP_WORKSPACE_ROOT", "").strip(),

@@ -52,9 +52,14 @@ The single source of truth for event names and payload fields is the
   `webhook_accepted`, `webhook_duplicate`
 - queue lifecycle: `prompt_queued`, `prompt_consumed` (with `ok`)
 - sandbox bridge: `sandbox_provisioned`, `sandbox_released`
-- ACP session: `agent_session_started`, `agent_message_chunk`,
-  `agent_tool_call`, `agent_usage`, `agent_permission`, `agent_finished`
-  (all carry `run_id` = the envelope id)
+- ACP session — ALL-traces (webui plan W0): `user_message_chunk`,
+  `agent_session_started`, `agent_message_chunk`, `agent_thought_chunk`,
+  `agent_tool_call`, `agent_plan`, `agent_plan_update`,
+  `agent_plan_removed`, `agent_commands_update`, `agent_mode_update`,
+  `agent_session_info`, `agent_config_update`, `agent_update`
+  (unrecognized kinds, never dropped), `agent_usage`, `agent_permission`,
+  `agent_finished` (all carry `run_id` = the envelope id; structured
+  payloads keep the protocol's wire field names)
 
 `GET /events` streams these over SSE (`text/event-stream`): full ring-buffer
 replay on subscribe, then live fan-out, `: keepalive` comments when idle
