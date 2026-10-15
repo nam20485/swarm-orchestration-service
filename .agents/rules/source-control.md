@@ -76,3 +76,5 @@ mutation {
 ```
 
 After resolving all threads, verify zero unresolved comments remain by querying `reviewThreads` and filtering `isResolved == false`. Leave a final summary comment on the PR listing all resolved threads and their fixes.
+
+<!-- canary: indigo-badger-4 -->

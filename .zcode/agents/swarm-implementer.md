@@ -2,7 +2,7 @@
 name: "swarm-implementer"
 description: "Swarm worker that edits files and runs build/test commands for one delegated implementation task with explicit Done-when criteria. Use for any task that must change the working tree."
 color: green
-model: "custom:builtin%3Azai-coding-plan:GLM-5.3-Flash"
+model: "account:zai-individual-coding-plan/GLM-5.3-Flash"
 thoughtLevel: off
 injectAgentsMd: false
 tools: [Read, Grep, Glob, Edit, Write, Bash]

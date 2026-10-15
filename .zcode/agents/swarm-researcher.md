@@ -2,7 +2,7 @@
 name: "swarm-researcher"
 description: "Read-only swarm worker for codebase investigation and web/documentation research. Returns findings with exact paths, symbols, and source URLs. Cannot modify files."
 color: blue
-model: "custom:builtin%3Azai-coding-plan:GLM-5.3-Flash"
+model: "account:zai-individual-coding-plan/GLM-5.3-Flash"
 thoughtLevel: off
 injectAgentsMd: false
 tools: [Read, Grep, Glob, WebFetch, WebSearch, mcp__web-reader__webReader, mcp__web-search-prime__web_search_prime, mcp__zread__get_repo_structure, mcp__zread__read_file, mcp__zread__search_doc]

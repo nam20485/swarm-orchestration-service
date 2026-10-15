@@ -76,3 +76,5 @@ The `.agents/skills/gh-issue-tracking-init/scripts/` directory is a **separate, 
 ## Note on `tmp-issue-body-project-setup.txt`
 
 `scripts/tmp-issue-body-project-setup.txt` is a kept scratch file — a staged draft of the `-Body` payload for a `create-dispatch-issue.ps1` project-setup dispatch. It is **not** a script and is **not** consumed by anything (`create-dispatch-issue.ps1` takes `-Body` as a string argument, not a file); it is retained as a reference example of a dispatch body.
+
+<!-- canary: ochre-wren-13 -->

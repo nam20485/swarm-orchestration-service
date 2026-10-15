@@ -190,6 +190,10 @@ class TestSettingsParsing:
         assert settings.sandbox_docker_bin == "docker"
 
     def test_from_env_parses_all_knobs(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Sandbox mode is on below; clear the clone-root knob so an ambient
+        # ACP_CLONE_ROOT can't trip the boot exclusivity check and fail this
+        # test for a reason it doesn't assert (mirror of test_acp_env_overrides).
+        monkeypatch.delenv("ACP_CLONE_ROOT", raising=False)
         monkeypatch.setenv("OS_WEBHOOK_SECRET", "s")
         monkeypatch.setenv("SANDBOX_ENABLED", "true")
         monkeypatch.setenv("SANDBOX_API_URL", "http://sbx:5000/")
@@ -206,6 +210,10 @@ class TestSettingsParsing:
     def test_enabled_without_api_url_raises(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        # Same isolation as above, as defensive symmetry: the missing-url
+        # guard fires before the exclusivity check, so an ambient clone root
+        # cannot mask this assertion — the delenv just keeps the env hermetic.
+        monkeypatch.delenv("ACP_CLONE_ROOT", raising=False)
         monkeypatch.setenv("OS_WEBHOOK_SECRET", "s")
         monkeypatch.setenv("SANDBOX_ENABLED", "1")
         monkeypatch.delenv("SANDBOX_API_URL", raising=False)

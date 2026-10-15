@@ -1,5 +1,7 @@
-# Kilo agent session state
-.kilo/
+# Kilo agent state — keep only the agent definitions and skills; worktrees and runtime state stay local
+.kilo/*
+!.kilo/agents/
+!.kilo/skills/
 
 # gh-issue-tracking-init forensic run logs (one timestamped file per run)
 gh-init-*.log
