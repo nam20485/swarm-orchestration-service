@@ -132,14 +132,23 @@ workspace shape (`web-reader`, `zread`, `web-search-prime`, `exa`); copy
 
 ## Verifying a change without spending a swarm run
 
-Spawn **one** worker with a trivial read-only task (worker toolsets are `Read, Grep, Glob[, Bash]`,
-so a Glob-plus-Grep question costs one or two calls), then read the newest
+Spawn **one** worker with a trivial read-only task (every worker includes `Read,
+Grep, Glob` — `swarm-agent` is exactly that set; `swarm-implementer` adds
+`Edit, Write, Bash` and `swarm-researcher` adds web + MCP tools, per the roster
+table in [swarm.md](swarm.md) — so a Glob-plus-Grep question costs one or two
+calls on any worker), then read the newest
 `~/.zcode/cli/rollout/model-io-sess_subagent_agent_*.jsonl` for `model.providerId` / `model.modelId`
 and `request.body.thinking`. A rejected model id writes **no** subagent telemetry at all — the absence
 is itself the signal that it failed before any model call.
 
 ## Open items
 
+- **King's `thoughtLevel: xhigh` is undocumented for its model** — the per-model
+  table covers GLM/GPT/Claude/Kimi/DeepSeek only; `qwen3.8-max` falls under
+  "other custom models" (a simple on/off toggle, or none — the docs' only Qwen
+  mention is the `enable_thinking` provider parameter, 2026-10-14 re-check).
+  Whether `xhigh` does anything on the king is unverified; a real king session's
+  `request.body.thinking` in the model-io telemetry would settle it.
 - **Custom-provider (UUID) def syntax unverified** — `swarm-orchestrator.md` uses
   `91b0a8e2-…/qwen3.8-max`. Cheapest discriminator: a throwaway def on `91b0a8e2-…/qwen3.8-flash`
   (same provider, cheap model) plus a one-line spawn — not a `$swarm` run on the king model.

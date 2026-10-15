@@ -210,8 +210,9 @@ class TestSettingsParsing:
     def test_enabled_without_api_url_raises(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # Same isolation as above: exclusivity is checked before the
-        # missing-url guard, so an ambient clone root masks this assertion.
+        # Same isolation as above, as defensive symmetry: the missing-url
+        # guard fires before the exclusivity check, so an ambient clone root
+        # cannot mask this assertion — the delenv just keeps the env hermetic.
         monkeypatch.delenv("ACP_CLONE_ROOT", raising=False)
         monkeypatch.setenv("OS_WEBHOOK_SECRET", "s")
         monkeypatch.setenv("SANDBOX_ENABLED", "1")

@@ -114,12 +114,21 @@ $rows | Format-Table -AutoSize -Wrap
 
 $neverRead = @($rows | Where-Object { $_.Status -eq 'NEVER READ' })
 $consulted = @($rows | Where-Object { $_.Status -eq 'consulted' })
-$decayed = $rows.Count - $neverRead.Count - $consulted.Count
+# Decoy untouched-ness must come from the decoy rows' own Reads column: decoys
+# never enter the consulted/NEVER READ buckets, so a subtraction over statuses
+# would report every decoy present as untouched — a static file count, not a
+# violation signal.
+$decoyRows = @($rows | Where-Object { $_.Status -like 'DECOY*' })
+$decoyRead = @($decoyRows | Where-Object { $_.Reads -gt 0 })
+$decayed = $decoyRows.Count - $decoyRead.Count
 if ($consulted.Count + $neverRead.Count -gt 0) {
   $rate = [math]::Round(100.0 * $consulted.Count / ($consulted.Count + $neverRead.Count), 1)
   Write-Host "`nconsult breadth   : $rate % of TOC-listed rule files read at least once in window"
   Write-Host "never read        : $($neverRead.Count)  ->  $(($neverRead | ForEach-Object { Split-Path $_.Rule -Leaf }) -join ', ')"
   Write-Host "decoys untouched  : $decayed"
+  if ($decoyRead.Count) {
+    Write-Host "!! DECOY READ     : $($decoyRead.Count)  ->  $(($decoyRead | ForEach-Object { Split-Path $_.Rule -Leaf }) -join ', ')" -ForegroundColor Yellow
+  }
 }
 
 $contam = @(Read-Jsonl (Join-Path $MetricsDir 'registry-contamination.jsonl'))

@@ -130,8 +130,10 @@ The point of a day of data is to decide whether prose disclosure suffices:
 
 ## Baseline at install (2026-09-27)
 
-Every rule file in both repos got a canary — 20 in `swarm-context` and 22 here, including this file,
-plus the two decoys per repo. Verified state at install: zero token duplicates, zero tokens present in
+Every rule file in both repos got a canary — 20 real rule files here, including
+this one (18 real in `swarm-context`), plus the two decoys per repo: 22 tracked
+`.md` files in total here. Verified state at install: zero token duplicates, zero
+tokens present in
 any `AGENTS.md` preview, zero dead TOC links, zero bare name-only bullets, `markdownlint-cli2` clean.
 `scripts/rules-metrics.ps1` reports 0 context loads / 0 reads / all files `NEVER READ` / 2 decoys
 untouched — that is the pre-measurement floor, not a failure. First real probe run confirmed the loop:
