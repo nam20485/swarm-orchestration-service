@@ -11,6 +11,9 @@ Two states, two places:
     trigger-gated (only when something is needed from the grandparent repo).
   - [`turing-alpha-bot-account.md`](turing-alpha-bot-account.md) — PROPOSED;
     Phase A/B both need an explicit owner go/no-go.
+  - [`webui-plan.md`](webui-plan.md) — DRAFT (2026-10-14); the 2026-09-23
+    web-UI park lifted by owner direction — observability UI over the event
+    surface, ALL protocol traces. Awaiting decisions on its Open Questions.
   - [`dispatch-in-live-checkout.md`](dispatch-in-live-checkout.md) — LANDED
     (PR #23, merged 2026-09-19); retained at the top level as the living spec
     for the dual agent environments while M1/M2 items stay open.
