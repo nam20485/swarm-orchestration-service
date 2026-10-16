@@ -61,8 +61,11 @@ The single source of truth for event names and payload fields is the
   `agent_finished` (all carry `run_id` = the envelope id; structured
   payloads keep the protocol's wire field names)
 
-`GET /events` streams these over SSE (`text/event-stream`): full ring-buffer
-replay on subscribe, then live fan-out, `: keepalive` comments when idle.
+`GET /` serves the observability page (webui plan W2): one static
+HTML+JS file, no build step — live feed (SSE client), run history with
+per-run traces, and the durable webhook tail. `GET /events` streams these
+over SSE (`text/event-stream`): full ring-buffer replay on subscribe, then
+live fan-out, `: keepalive` comments when idle.
 Durable history (webui plan W1, `WEBHOOK_EVENTS_LOG_ENABLED`): every emit is
 appended as JSONL under `ACP_TRACE_ROOT` — `<run_id>/events.jsonl` per run
 (beside `harness.log`/`manifest.json` from `trace_log`), a rotated

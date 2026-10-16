@@ -103,6 +103,11 @@ webhook_received -> webhook_accepted -> prompt_queued
   -> [sandbox_released] -> prompt_consumed {ok: true}
 ```
 
+Or just open the observability page in a browser —
+`http://127.0.0.1:8080/` (listener-local like all dashboard endpoints):
+live feed, run history with full per-run traces, and the durable webhook
+tail, all fed by the endpoints below.
+
 Run history that outlives the ring (and restarts) lives under
 `ACP_TRACE_ROOT` (`WEBHOOK_EVENTS_LOG_ENABLED`, default on):
 

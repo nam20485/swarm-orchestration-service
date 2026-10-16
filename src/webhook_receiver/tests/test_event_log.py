@@ -1,5 +1,5 @@
-"""Tests for the durable event tail (webui plan W1) — event_log + the
-EventStore sink seam + the /runs endpoints."""
+"""Tests for the durable event tail (webui plans W1/W2) — event_log, the
+EventStore sink seam, and the /runs + /events/history + index endpoints."""
 
 from __future__ import annotations
 
@@ -12,7 +12,12 @@ from fastapi.testclient import TestClient
 
 from webhook_receiver.app import create_app
 from webhook_receiver.config import Settings
-from webhook_receiver.event_log import EventLog, list_runs, read_run_events
+from webhook_receiver.event_log import (
+    EventLog,
+    list_runs,
+    read_global_tail,
+    read_run_events,
+)
 from webhook_receiver.event_store import EventStore
 
 SECRET = "FAKE-WEBHOOK-SECRET-FOR-TESTING"
@@ -224,3 +229,61 @@ class TestRunsEndpoints:
         # prompt_queued is emitted synchronously at enqueue; the consumer's
         # prompt_consumed may follow, so pin the head, not the whole list.
         assert run_events[0]["type"] == "prompt_queued"
+
+
+class TestGlobalTailAndIndex:
+    def test_read_global_tail_merges_rotated_pair(self, tmp_path: Path) -> None:
+        root = tmp_path / "runs"
+        root.mkdir()
+        (root / "events.jsonl.1").write_text(
+            json.dumps(make_event("webhook_received", delivery_id="d-1")) + "\n",
+            encoding="utf-8",
+        )
+        (root / "events.jsonl").write_text(
+            json.dumps(make_event("webhook_accepted", delivery_id="d-1")) + "\n",
+            encoding="utf-8",
+        )
+        tail = read_global_tail(str(root))
+        assert [item["type"] for item in tail] == [
+            "webhook_received",
+            "webhook_accepted",
+        ]
+
+    def test_history_endpoint_empty_when_never_written(self, tmp_path: Path) -> None:
+        client = self.make_app_client(tmp_path)
+        assert client.get("/events/history").json() == []
+
+    def test_history_endpoint_serves_durable_tail(self, tmp_path: Path) -> None:
+        root = tmp_path / "runs"
+        root.mkdir()
+        (root / "events.jsonl").write_text(
+            json.dumps(make_event("webhook_filtered", delivery_id="d-9", reason="label"))
+            + "\n",
+            encoding="utf-8",
+        )
+        client = self.make_app_client(tmp_path)
+        body = client.get("/events/history").json()
+        assert body[0]["type"] == "webhook_filtered"
+        assert body[0]["data"]["delivery_id"] == "d-9"
+
+    @staticmethod
+    def make_app_client(tmp_path: Path) -> TestClient:
+        settings = Settings(
+            host="testserver",
+            port=80,
+            github_webhook_secret=SECRET,
+            max_body_bytes=25 * 1024 * 1024,
+            log_level="info",
+            acp_enabled=False,
+            acp_trace_root=str(tmp_path / "runs"),
+        )
+        return TestClient(create_app(settings))
+
+    def test_index_serves_the_static_page(self, tmp_path: Path) -> None:
+        client = self.make_app_client(tmp_path)
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("text/html")
+        assert "swarm-orchestration" in resp.text
+        # The page must render data as text, never parse it as HTML.
+        assert "innerHTML" not in resp.text

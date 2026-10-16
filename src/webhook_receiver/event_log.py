@@ -175,6 +175,25 @@ def list_runs(trace_root: str) -> list[dict[str, Any]]:
     return entries
 
 
+def read_global_tail(trace_root: str) -> list[dict[str, Any]]:
+    """Durable global tail: the rotated root-level ``events.jsonl`` pair,
+    oldest first (previous generation, then current). Empty when the events
+    log has never written (or is disabled)."""
+    root = resolve_trace_root(trace_root)
+    events: list[dict[str, Any]] = []
+    for name in ("events.jsonl.1", "events.jsonl"):
+        try:
+            lines = (root / name).read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            try:
+                events.append(json.loads(line))
+            except ValueError:
+                continue  # tolerate a torn tail line from a crash mid-write
+    return events
+
+
 def read_run_events(trace_root: str, run_id: str) -> list[dict[str, Any]] | None:
     """Full per-run event history, oldest first; None when no such run.
 
