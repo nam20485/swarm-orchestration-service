@@ -127,7 +127,7 @@ document.querySelectorAll("nav button").forEach((btn) => {
 // ── live SSE feed ───────────────────────────────────────────────────────
 let paused = false;
 let liveItems = [];
-let highWaterId = 0; // store ids are monotonic per server lifetime
+const seenIds = new Set(); // membership dedupe — survives server id resets
 const liveMatch = (item) => {
   const q = $("live-filter").value.trim().toLowerCase();
   if (!q) return true;
@@ -173,7 +173,7 @@ const wireExpansion = (details, key) => {
     else expandedIds.delete(key);
   });
 };
-const appendData = (container, item) => {
+const appendData = (container, item, keyPrefix = "live") => {
   const d = item.data || {};
   const text = d.text ?? d.error ?? d.reason ?? d.stop_reason ?? null;
   const structured = ["entries", "plan", "commands", "options", "payload"].some(
@@ -187,7 +187,7 @@ const appendData = (container, item) => {
   }
   if (structured || text === null) {
     const details = document.createElement("details");
-    wireExpansion(details, `live:${item.id}`);
+    wireExpansion(details, `${keyPrefix}:${item.id}`);
     const summary = document.createElement("summary");
     summary.textContent = "json";
     details.appendChild(summary);
@@ -213,10 +213,11 @@ const connect = () => {
     es.addEventListener(type, (ev) => {
       const id = parseInt(ev.lastEventId, 10) || 0;
       // The ring replays on every (re)connect and the server ignores
-      // Last-Event-ID, so suppress ids at or below the high-water mark —
-      // reconnects would otherwise duplicate everything already shown.
-      if (id <= highWaterId) return;
-      highWaterId = id;
+      // Last-Event-ID, so dedupe by membership — not a high-water mark,
+      // which a server restart (ids reset to 1) would silence forever.
+      if (seenIds.has(id)) return;
+      seenIds.add(id);
+      if (seenIds.size > 5000) seenIds.clear(); // bounded; replay window ≪ this
       const data = JSON.parse(ev.data);
       // The SSE frame carries the data dict only; ts falls back to arrival
       // time (ring-replayed items show "now" — durable views carry true ts).
@@ -291,6 +292,7 @@ const openRun = async (runId) => {
     dataCell.className = "wrap";
     if (COLLAPSED.has(item.type)) {
       const details = document.createElement("details");
+      wireExpansion(details, `run:${runId}:${item.id}`);
       const summary = document.createElement("summary");
       const d = item.data || {};
       summary.textContent =
@@ -302,7 +304,7 @@ const openRun = async (runId) => {
       details.appendChild(pre);
       dataCell.appendChild(details);
     } else {
-      appendData(dataCell, item);
+      appendData(dataCell, item, `run:${runId}`);
     }
     tr.appendChild(dataCell);
   }
