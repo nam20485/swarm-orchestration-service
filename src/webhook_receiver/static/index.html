@@ -127,6 +127,7 @@ document.querySelectorAll("nav button").forEach((btn) => {
 // ── live SSE feed ───────────────────────────────────────────────────────
 let paused = false;
 let liveItems = [];
+let highWaterId = 0; // store ids are monotonic per server lifetime
 const liveMatch = (item) => {
   const q = $("live-filter").value.trim().toLowerCase();
   if (!q) return true;
@@ -136,12 +137,16 @@ const liveMatch = (item) => {
     ((item.data || {}).id || "").toLowerCase().includes(q)
   );
 };
+const updateLiveCount = () => {
+  const shown = liveItems.filter(liveMatch).slice(0, MAX_ROWS);
+  $("live-count").textContent = `${shown.length} shown · ${liveItems.length} buffered`;
+};
 const renderLive = () => {
   const body = $("live-body");
   body.textContent = "";
   const shown = liveItems.filter(liveMatch).slice(0, MAX_ROWS);
   $("live-empty").textContent = liveItems.length ? "" : "no events yet";
-  $("live-count").textContent = `${shown.length} shown · ${liveItems.length} buffered`;
+  updateLiveCount();
   for (const item of shown) {
     const tr = document.createElement("tr");
     cell(tr, String(item.id), "dim");
@@ -160,6 +165,14 @@ const renderLive = () => {
     body.appendChild(tr);
   }
 };
+const expandedIds = new Set(); // survives tbody rebuilds mid-stream
+const wireExpansion = (details, key) => {
+  details.open = expandedIds.has(key);
+  details.addEventListener("toggle", () => {
+    if (details.open) expandedIds.add(key);
+    else expandedIds.delete(key);
+  });
+};
 const appendData = (container, item) => {
   const d = item.data || {};
   const text = d.text ?? d.error ?? d.reason ?? d.stop_reason ?? null;
@@ -174,6 +187,7 @@ const appendData = (container, item) => {
   }
   if (structured || text === null) {
     const details = document.createElement("details");
+    wireExpansion(details, `live:${item.id}`);
     const summary = document.createElement("summary");
     summary.textContent = "json";
     details.appendChild(summary);
@@ -197,11 +211,18 @@ const connect = () => {
     "agent_permission", "agent_finished",
   ]) {
     es.addEventListener(type, (ev) => {
+      const id = parseInt(ev.lastEventId, 10) || 0;
+      // The ring replays on every (re)connect and the server ignores
+      // Last-Event-ID, so suppress ids at or below the high-water mark —
+      // reconnects would otherwise duplicate everything already shown.
+      if (id <= highWaterId) return;
+      highWaterId = id;
       const data = JSON.parse(ev.data);
       // The SSE frame carries the data dict only; ts falls back to arrival
       // time (ring-replayed items show "now" — durable views carry true ts).
       liveItems.unshift({ id: ev.lastEventId, ts: data.ts ?? Date.now() / 1000, type, data });
       liveItems = liveItems.slice(0, 2000);
+      updateLiveCount();
       if (!paused) renderLive();
     });
   }
@@ -216,7 +237,9 @@ $("live-pause").addEventListener("click", () => {
 // ── runs ────────────────────────────────────────────────────────────────
 const loadRuns = async () => {
   try {
-    const runs = await (await fetch("/runs")).json();
+    const res = await fetch("/runs");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const runs = await res.json();
     const body = $("runs-body"); body.textContent = "";
     $("runs-empty").textContent = runs.length ? "" : "no runs recorded yet";
     for (const run of runs) {
@@ -241,8 +264,14 @@ const openRun = async (runId) => {
   $("runs").classList.add("active");
   const box = $("detail"); box.hidden = false; box.textContent = "loading…";
   let events;
-  try { events = await (await fetch(`/runs/${runId}/events`)).json(); }
-  catch { box.textContent = `failed to load run ${runId}`; return; }
+  try {
+    const res = await fetch(`/runs/${runId}/events`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    events = await res.json();
+  } catch {
+    box.textContent = `failed to load run ${runId}`;
+    return;
+  }
   box.textContent = "";
   const h = document.createElement("h3");
   h.textContent = `run ${runId} · ${events.length} events`;
@@ -284,11 +313,13 @@ $("runs-refresh").addEventListener("click", loadRuns);
 // ── webhooks (durable global tail) ─────────────────────────────────────
 const loadWebhooks = async () => {
   try {
-    const all = await (await fetch("/events/history")).json();
+    const res = await fetch("/events/history");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const all = await res.json();
     const hooks = all.filter((item) => String(item.type).startsWith("webhook_"));
     const body = $("hooks-body"); body.textContent = "";
     $("hooks-empty").textContent = hooks.length ? "" : "no webhook events recorded yet";
-    for (const item of hooks.slice().reverse()) {
+    for (const item of hooks.slice(-MAX_ROWS).reverse()) {
       const d = item.data || {};
       const tr = document.createElement("tr");
       cell(tr, String(item.id), "dim");

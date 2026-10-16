@@ -202,8 +202,9 @@ def create_app(
         """Durable global tail (webui plan W2): pre-envelope webhook events
         from the rotated root-level events.jsonl pair, oldest first. The
         webhooks view filters these client-side; survives restarts unlike
-        the ring."""
-        return read_global_tail(cfg.acp_trace_root)
+        the ring. Offloaded like the run-events read — a fully-rotated
+        tail must never stall the loop."""
+        return await asyncio.to_thread(read_global_tail, cfg.acp_trace_root)
 
     @app.get("/runs")
     async def runs() -> list[dict[str, Any]]:

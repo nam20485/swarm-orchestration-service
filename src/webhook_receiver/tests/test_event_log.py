@@ -14,7 +14,6 @@ from webhook_receiver.app import create_app
 from webhook_receiver.config import Settings
 from webhook_receiver.event_log import (
     EventLog,
-    list_runs,
     read_global_tail,
     read_run_events,
 )
@@ -252,6 +251,20 @@ class TestGlobalTailAndIndex:
     def test_history_endpoint_empty_when_never_written(self, tmp_path: Path) -> None:
         client = self.make_app_client(tmp_path)
         assert client.get("/events/history").json() == []
+
+    def test_torn_or_foreign_lines_are_tolerated(self, tmp_path: Path) -> None:
+        root = tmp_path / "runs"
+        root.mkdir()
+        (root / "events.jsonl").write_bytes(
+            json.dumps(make_event("webhook_received", delivery_id="d-1")).encode()
+            + b"\n"
+            + b'{"type": "torn", "data": {"text": "trunc'  # crash mid-write
+            + b"\n"
+            + b"42\n"  # parses, but not a dict
+            + b"\xff\xfe invalid utf8\n"
+        )
+        tail = read_global_tail(str(root))
+        assert [item["type"] for item in tail] == ["webhook_received"]
 
     def test_history_endpoint_serves_durable_tail(self, tmp_path: Path) -> None:
         root = tmp_path / "runs"
