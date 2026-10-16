@@ -1,7 +1,8 @@
 # Plan: Service Web UI (Orchestration Observability)
 
-Status: draft — pending owner decisions (see Open Questions)
-Date: 2026-10-14
+Status: APPROVED — owner decisions folded 2026-10-15 (see Decisions);
+implementation not started (W0 first)
+Date: 2026-10-14 (decisions folded 2026-10-15)
 
 ## Goal
 
@@ -28,14 +29,14 @@ blacklist was to be reintroduced.
 
 ### But the current implementation does NOT forward all traces
 
-`acp_host.py` maps only **4 of the 12** `session_update` kinds in the pinned
+`acp_host.py` maps only **4 of the 13** `session_update` kinds in the pinned
 `agent-client-protocol` SDK into events:
 
 | Mapped today → event | Dropped today (logged, not emitted) |
 |---|---|
 | `agent_message_chunk` → `agent_message_chunk` | `user_message_chunk` (the prompt echo) |
 | `tool_call`, `tool_call_update` → `agent_tool_call` | `agent_thought_chunk` |
-| `usage_update` → `agent_usage` | `plan_update`, `plan_removed` |
+| `usage_update` → `agent_usage` | `plan` (full snapshot), `plan_update`, `plan_removed` |
 | | `available_commands_update`, `current_mode_update`, `session_info_update`, `config_option_update` |
 
 The `acp_host.py` module docstring says so explicitly: plan deltas, mode
@@ -55,6 +56,15 @@ traces" literal is therefore a backend change (Phase W0 below), not just a UI.
   (`app.py` module docstring, mirrored in `src/webhook_receiver/README.md`,
   additive changes only). `skill-plan.md`'s "No dashboard" non-goal was about
   that skill, not this work.
+- **Per-run persistence landed since** (PR #32, `harness-trace-parity`):
+  `webhook_receiver.trace_log` writes a restart-surviving per-run record
+  under `ACP_TRACE_ROOT` (default `logs/runs/<run_id>/`: `harness.log` =
+  every harness stderr line, flushed, redacted, noise-unfiltered;
+  `manifest.json` = identity + outcome; retention `ACP_TRACE_KEEP_RUNS`,
+  default 50, pruned oldest-first). That is the harness **stderr**, not the
+  protocol event stream — the ring buffer remains the only *event*
+  persistence — but W1 builds on these directory/knob conventions rather
+  than inventing parallel ones.
 - **Constraints to design around**:
   - `EventStore` is an in-memory ring (`maxlen=1000`, not config-wired; only
     `WEBHOOK_EVENTS_KEEPALIVE` is a knob) — a restart wipes everything, and a
@@ -80,11 +90,23 @@ sandbox lifecycle — a different concern, .NET backend).
 
 ## Proposed shape
 
+**Relationship to `harness-trace-parity` S4** (same function, two plans):
+S4's event half ("recover the agent's voice" — thought chunks + plan deltas
+into the event stream) is subsumed by W0, which maps **all 13** kinds. When
+executing both plans, W0 is the superset implementation of the widening: land
+W0 first (or as the same branch), take S4's unique remainder — rendering
+thought/plan into `harness.log` in the golden style (`[acp] Thinking: …`) —
+as the S4 remnant, and reconcile the event names once in W0's favor
+(protocol-faithful `agent_thought_chunk`, not S4's sketched `agent_thought`;
+S6's docs sweep reflects the final names). Note S6 already owns correcting
+the "15-event contract" count (14 names are actually emitted today).
+
 Backend-first, three small phases, each its own PR:
 
 1. **W0 — ALL-traces contract widening** (no UI): `acp_host.session_update`
    forwards **every** kind. Known kinds get typed events (`agent_thought_chunk`,
-   `agent_plan` for `plan_update`/`plan_removed`, `agent_commands_update`,
+   `agent_plan`/`agent_plan_update`/`agent_plan_removed` for the three plan
+   kinds, `agent_commands_update`,
    `agent_mode_update`, `agent_session_info`, `agent_config_update`,
    `user_message_chunk`); anything unrecognized emits a generic `agent_update`
    passthrough (`kind` + full JSON-safe payload) so unknown kinds are never
@@ -93,8 +115,14 @@ Backend-first, three small phases, each its own PR:
    becomes a knob (`WEBHOOK_EVENTS_MAXLEN`). Contract table updated in all
    three mirrors (`app.py` docstring, `src/webhook_receiver/README.md`,
    `docs/usage.md`).
-2. **W1 — Run history persistence**: append every event to a per-run JSONL
-   file under a logs dir (the old repo's run-log pattern); add `/runs` and
+2. **W1 — Run history persistence**: append every event to
+   `ACP_TRACE_ROOT/<run_id>/events.jsonl` — a sibling of `trace_log`'s
+   `harness.log`/`manifest.json` — reusing `ACP_TRACE_KEEP_RUNS` retention
+   (same directory, same lifecycle) and the best-effort
+   never-fails-a-dispatch posture. Gated by **its own flag** (owner,
+   2026-10-15): `WEBHOOK_EVENTS_LOG_ENABLED`, default on, independent of
+   `ACP_TRACE_ENABLED` — events are recorded even when stderr capture is off
+   (the run dir is created by whichever writer fires first). Add `/runs` and
    `/runs/{run_id}/events` so history survives refresh/restart. Live path
    stays the ring/SSE.
 3. **W2 — The UI**: static vanilla HTML+JS page(s) served by the FastAPI app
@@ -126,18 +154,21 @@ Revisit only if the UI outgrows Option A.
 A .NET front end onto a Python listener — the precedent is a separate .NET
 service with its own backend. Not a fit here.
 
-## Open questions
+## Decisions (owner-folded 2026-10-15)
 
-1. **v1 scope** — live feed only, or feed + run history + webhooks view?
-   (Recommendation: all three — they fall out of the same store/log.)
-2. **Persistence** — per-run JSONL files (recommended, old-repo pattern) vs
-   memory-only v1 (simplest, but a refresh during a long run loses the head).
-3. **Exposure** — keep listener-local/SSH-tunnel for v1 (recommended; posture
-   unchanged) vs token auth + Caddy route now.
-4. **Chunk-y kinds** — `user_message_chunk` (the full dispatch-prompt echo)
-   and `agent_thought_chunk` can be large/frequent: forward verbatim and
-   collapse in the UI (recommended, consistent with ALL-traces) vs
-   server-side truncation.
+All four open questions were taken as recommended; the events log also gets
+its own enable flag rather than riding `ACP_TRACE_ENABLED`:
+
+1. **v1 scope** — all three views: live feed + run history + webhook
+   deliveries (they fall out of the same store/log).
+2. **Persistence** — per-run JSONL files, anchored to the `trace_log`
+   conventions per W1 above (`ACP_TRACE_ROOT` run dir, `ACP_TRACE_KEEP_RUNS`
+   retention, best-effort posture).
+3. **Exposure** — listener-local/SSH-tunnel for v1; posture unchanged, no
+   auth surface. Token auth + a Caddy route stays W3, owner-gated.
+4. **Chunk-y kinds** — `user_message_chunk` and `agent_thought_chunk` are
+   forwarded verbatim (consistent with ALL-traces); the UI collapses them by
+   default. No server-side truncation.
 
 ## Non-goals
 
@@ -155,7 +186,7 @@ service with its own backend. Not a fit here.
 
 Every phase PR runs the full `validation.ps1` gate (build → scan → test;
 coverage stays > 85%). W0's mapping is unit-tested through the duck-typed
-client callbacks (all 12 kinds + one synthetic unknown kind); the SSE tests
+client callbacks (all 13 kinds + one synthetic unknown kind); the SSE tests
 bind a real uvicorn on an ephemeral port (starlette TestClient deadlocks on
 infinite SSE — house gotcha). The e2e simulator's `/events` assertions grow
 with any new event names it can observe.
