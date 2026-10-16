@@ -1,9 +1,9 @@
 # Plan: Service Web UI (Orchestration Observability)
 
-Status: IN PROGRESS — owner decisions folded 2026-10-15 (see Decisions);
-W0 LANDED (PR #35, `549382b`); W1 LANDED (PR #36, `24b8378`); W2 (the UI)
-implemented on `dev/webui-w2`, PR pending — the last phase
-Date: 2026-10-14 (decisions folded 2026-10-15; W0+W1 landed; W2 coded 2026-10-15)
+Status: COMPLETE — W0 LANDED (PR #35, `549382b`), W1 LANDED (PR #36,
+`24b8378`), W2 LANDED via PR #37 (this merge). W3 (token auth + Caddy
+exposure) remains owner-gated and deliberately not built.
+Date: 2026-10-14 (decisions folded 2026-10-15; W0+W1+W2 landed 2026-10-15)
 
 ## Goal
 
