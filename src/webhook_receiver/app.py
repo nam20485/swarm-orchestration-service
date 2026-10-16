@@ -107,7 +107,10 @@ def create_app(
     set, the consumer drives the ACP host — one cold opencode session per
     envelope. An injected ``prompt_queue`` keeps its own host (tests and
     host variants wire their own); with ACP disabled the consumer falls back
-    to the Phase 1 mark-consumed placeholder.
+    to the Phase 1 mark-consumed placeholder. The same ownership applies to
+    an injected ``event_store``: it keeps its own sink wiring (or none) —
+    the durable events tail is attached only to the default-constructed
+    store, whose construction this function owns.
     """
     cfg = settings or Settings.from_env()
     sink = (
@@ -186,7 +189,11 @@ def create_app(
         """Full per-run event history from ``events.jsonl``, oldest first —
         the durable counterpart of the ring replay. 404 for an unknown run
         or a malformed run id."""
-        events = read_run_events(cfg.acp_trace_root, run_id)
+        # Offloaded like /events' blocking work: a long run's tail must
+        # never stall the loop (and through it, webhook handling).
+        events = await asyncio.to_thread(
+            read_run_events, cfg.acp_trace_root, run_id
+        )
         if events is None:
             raise HTTPException(
                 status_code=404, detail=f"No event history for run {run_id!r}"

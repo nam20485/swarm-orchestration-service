@@ -29,7 +29,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from webhook_receiver.trace_log import prune_runs, resolve_trace_root
+from webhook_receiver.trace_log import prune_runs, redact, resolve_trace_root
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +56,18 @@ def _run_id_of(data: dict[str, Any]) -> str | None:
     return None
 
 
+def _redact_value(obj: Any) -> Any:
+    """Deep-redact string payload values (trace_log parity: a bare token
+    must not land on disk, and these files are served back over HTTP)."""
+    if isinstance(obj, str):
+        return redact(obj)
+    if isinstance(obj, list):
+        return [_redact_value(item) for item in obj]
+    if isinstance(obj, dict):
+        return {key: _redact_value(value) for key, value in obj.items()}
+    return obj
+
+
 class EventLog:
     """Appends event items as JSONL under the trace root; never raises."""
 
@@ -75,7 +87,10 @@ class EventLog:
     def append(self, item: dict[str, Any]) -> None:
         """Append one event item (``{id, type, ts, data}``); best-effort."""
         try:
-            line = json.dumps(item, separators=(",", ":"), default=str) + "\n"
+            # The disk copy carries redacted strings; the ring/SSE copy is
+            # untouched (the sink receives the item before this rewrite).
+            persisted = {**item, "data": _redact_value(item.get("data") or {})}
+            line = json.dumps(persisted, separators=(",", ":"), default=str) + "\n"
             rid = _run_id_of(item.get("data") or {})
             with self._lock:
                 if rid is None:
@@ -138,11 +153,15 @@ def list_runs(trace_root: str) -> list[dict[str, Any]]:
     except OSError:
         return []
     for directory in candidates:
-        entry: dict[str, Any] = {
-            "run_id": directory.name,
-            "events_bytes": (directory / "events.jsonl").stat().st_size,
-            "modified_at": directory.stat().st_mtime,
-        }
+        try:
+            entry: dict[str, Any] = {
+                "run_id": directory.name,
+                "events_bytes": (directory / "events.jsonl").stat().st_size,
+                "modified_at": directory.stat().st_mtime,
+            }
+        except OSError:
+            # Pruned between the snapshot and the stat — skip, don't 500.
+            continue
         manifest = directory / "manifest.json"
         if manifest.is_file():
             try:

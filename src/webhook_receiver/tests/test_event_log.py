@@ -145,7 +145,23 @@ class TestRunsEndpoints:
     def test_unknown_or_malformed_run_404s(self, tmp_path: Path) -> None:
         client = self.make_app(tmp_path)
         assert client.get("/runs/deadbeef/events").status_code == 404
-        assert client.get("/runs/../etc/events").status_code == 404
+        # 65 chars: survives routing, fails the 64-cap segment check —
+        # this is the request that actually exercises the guard.
+        assert client.get("/runs/" + "a" * 65 + "/events").status_code == 404
+        assert read_run_events(str(tmp_path), "../etc") is None
+
+    def test_disk_copy_is_redacted(self, tmp_path: Path) -> None:
+        log = EventLog(tmp_path, keep_runs=50)
+        log.append(
+            make_event(
+                "agent_message_chunk",
+                run_id="9" * 32,
+                text="token is ghp_" + "A" * 36 + " ok?",
+            )
+        )
+        stored = (tmp_path / ("9" * 32) / "events.jsonl").read_text()
+        assert "ghp_" + "A" * 36 not in stored
+        assert "[REDACTED]" in stored
 
     def test_events_log_disabled_writes_nothing(self, tmp_path: Path) -> None:
         client = self.make_app(tmp_path, events_log=False)
