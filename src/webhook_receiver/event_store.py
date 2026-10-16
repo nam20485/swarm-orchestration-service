@@ -5,7 +5,7 @@ import queue
 import threading
 import time
 from collections import deque
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any
 
 
@@ -63,14 +63,24 @@ class EventStore:
     this store only records events for the dashboard.
     """
 
-    def __init__(self, maxlen: int = 1000) -> None:
+    def __init__(
+        self,
+        maxlen: int = 1000,
+        sink: Callable[[dict[str, Any]], None] | None = None,
+    ) -> None:
         self._events: deque[dict[str, Any]] = deque(maxlen=maxlen)
         self._subscribers: list[queue.Queue[dict[str, Any] | None]] = []
         self._lock = threading.Lock()
         self._counter = itertools.count(1)
+        self._sink = sink
 
     def emit(self, event_type: str, **data: Any) -> None:
-        """Append an event and fan-out to all subscribers."""
+        """Append an event and fan-out to all subscribers.
+
+        With a ``sink`` wired (webui plan W1's durable event log), the item
+        is handed over after fan-out; a raising sink is logged and swallowed
+        so persistence can never fail an emit.
+        """
         event = {
             "id": next(self._counter),
             "type": event_type,
@@ -85,6 +95,13 @@ class EventStore:
                 sub.put_nowait(event)
             except queue.Full:
                 pass
+        if self._sink is not None:
+            try:
+                self._sink(event)
+            except Exception:  # noqa: BLE001 - sinks self-swallow; belt+braces
+                import logging
+
+                logging.getLogger(__name__).exception("event sink failed")
 
     def recent(self, limit: int = 100) -> list[dict[str, Any]]:
         """Return the last *limit* events (oldest-first within the window)."""

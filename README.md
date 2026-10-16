@@ -79,6 +79,7 @@ Every knob is an environment variable parsed in
 | `WEBHOOK_LOG_LEVEL` | `info` | uvicorn and logging level |
 | `WEBHOOK_EVENTS_KEEPALIVE` | `15` | idle seconds before the SSE stream emits a keepalive comment (must be positive) |
 | `WEBHOOK_EVENTS_MAXLEN` | `1000` | event ring-buffer capacity — the `GET /events` replay window (every ACP `session/update` kind is an event) |
+| `WEBHOOK_EVENTS_LOG_ENABLED` | `true` | durable event tail — JSONL under `ACP_TRACE_ROOT` (`<run_id>/events.jsonl` + rotated global tail), read back via `GET /runs`; independent of `ACP_TRACE_ENABLED` |
 | `ACP_ENABLED` | `true` | drive opencode over ACP per envelope; `false` keeps the queue-consumer placeholder (no agent sessions) |
 | `ACP_OPENCODE_BIN` | PATH, then `~/.opencode/bin/opencode` | opencode binary location |
 | `ACP_WORKSPACE_ROOT` | `/tmp/swarm-acp-workspaces` | root for per-run session workspaces (the repo itself is never used) |
