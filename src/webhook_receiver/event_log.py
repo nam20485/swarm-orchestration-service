@@ -175,6 +175,14 @@ def list_runs(trace_root: str) -> list[dict[str, Any]]:
     return entries
 
 
+def read_global_tail(trace_root: str) -> list[dict[str, Any]]:
+    """Durable global tail: the rotated root-level ``events.jsonl`` pair,
+    oldest first (previous generation, then current). Empty when the events
+    log has never written (or is disabled)."""
+    root = resolve_trace_root(trace_root)
+    return _read_tail_pair(root / "events.jsonl.1", root / "events.jsonl")
+
+
 def read_run_events(trace_root: str, run_id: str) -> list[dict[str, Any]] | None:
     """Full per-run event history, oldest first; None when no such run.
 
@@ -183,14 +191,29 @@ def read_run_events(trace_root: str, run_id: str) -> list[dict[str, Any]] | None
     if run_id in (".", "..") or not _RUN_SEGMENT_RE.fullmatch(run_id):
         return None
     path = resolve_trace_root(trace_root) / run_id / "events.jsonl"
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return None
+    if not path.is_file():
+        return None  # unknown run — the endpoint 404s on this
+    return _read_tail_pair(path)
+
+
+def _read_tail_pair(*paths: Path) -> list[dict[str, Any]]:
+    """Parse JSONL files oldest-path-first; tolerate anything foreign.
+
+    Decoding happens per line inside the tolerance net (UnicodeDecodeError
+    is a ValueError), a torn tail line is skipped, and only dict objects
+    survive — corrupt content degrades to fewer events, never a 500.
+    """
     events: list[dict[str, Any]] = []
-    for line in lines:
+    for path in paths:
         try:
-            events.append(json.loads(line))
-        except ValueError:
-            continue  # tolerate a torn tail line from a crash mid-write
+            raw = path.read_bytes()
+        except OSError:
+            continue
+        for raw_line in raw.splitlines():
+            try:
+                obj = json.loads(raw_line.decode("utf-8"))
+            except ValueError:
+                continue
+            if isinstance(obj, dict):
+                events.append(obj)
     return events

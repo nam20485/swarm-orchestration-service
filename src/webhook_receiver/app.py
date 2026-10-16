@@ -12,6 +12,12 @@ network or via an SSH/compose tunnel):
   comment is emitted after ``WEBHOOK_EVENTS_KEEPALIVE`` idle seconds. Each
   frame carries the store's monotonic ``id``, the event ``type``, and the
   event data as a JSON ``data`` line.
+- ``GET /`` — the observability page (webui plan W2): static HTML+JS,
+  no build step — live feed over the SSE endpoint, run history with full
+  per-run traces, and the durable webhook tail. Listener-local.
+- ``GET /events/history`` — durable global tail (rotated root-level
+  ``events.jsonl`` pair, oldest first) — pre-envelope webhook events that
+  survive restarts, unlike the ring.
 - ``GET /runs`` / ``GET /runs/{run_id}/events`` — durable run history from
   the events JSONL tail (webui plan W1, ``WEBHOOK_EVENTS_LOG_ENABLED``):
   index of runs under ``ACP_TRACE_ROOT`` (newest first, manifests merged),
@@ -66,16 +72,22 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from pathlib import Path
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from webhook_receiver.acp_host import AcpHost
 from webhook_receiver.config import Settings
-from webhook_receiver.event_log import EventLog, list_runs, read_run_events
+from webhook_receiver.event_log import (
+    EventLog,
+    list_runs,
+    read_global_tail,
+    read_run_events,
+)
 from webhook_receiver.event_store import EventStore
 from webhook_receiver.filters import should_dispatch
 from webhook_receiver.github import verify_signature
@@ -84,6 +96,8 @@ from webhook_receiver.prompt_queue import PromptInfo, PromptQueue
 from webhook_receiver.trace_log import resolve_trace_root
 
 logger = logging.getLogger(__name__)
+
+_STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
 def _sse_frame(item: dict[str, Any] | None) -> str:
@@ -175,6 +189,22 @@ def create_app(
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache"},
         )
+
+    @app.get("/", include_in_schema=False)
+    async def index() -> FileResponse:
+        """Observability page (webui plan W2): live SSE feed, run history,
+        and the durable webhook tail — one static HTML file, no build step,
+        no dependencies. Listener-local like every dashboard endpoint."""
+        return FileResponse(_STATIC_DIR / "index.html")
+
+    @app.get("/events/history")
+    async def events_history() -> list[dict[str, Any]]:
+        """Durable global tail (webui plan W2): pre-envelope webhook events
+        from the rotated root-level events.jsonl pair, oldest first. The
+        webhooks view filters these client-side; survives restarts unlike
+        the ring. Offloaded like the run-events read — a fully-rotated
+        tail must never stall the loop."""
+        return await asyncio.to_thread(read_global_tail, cfg.acp_trace_root)
 
     @app.get("/runs")
     async def runs() -> list[dict[str, Any]]:

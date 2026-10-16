@@ -122,9 +122,12 @@ a rotated global tail — read back via `GET /runs`; history survives restarts.
 The 24-event contract — `webhook_*`, `prompt_*`, `sandbox_*`,
 `user_message_chunk`, `agent_*` — is documented in the
 `app.py` module docstring and summarized in
-[`src/webhook_receiver/README.md`](../src/webhook_receiver/README.md). This
-is the surface a dashboard consumes; none is built yet (the old stack's
-dashboard was not ported).
+[`src/webhook_receiver/README.md`](../src/webhook_receiver/README.md). A
+first-cut observability page consumes it: `GET /` serves a static,
+no-build HTML+JS view (webui plan W2) over the live SSE feed, durable run
+history (`/runs`), and the rotated webhook tail (`/events/history`) —
+listener-local like the rest of the dashboard surface (the old stack's
+full dashboard was not ported; see `docs/plans/webui-plan.md`).
 
 ## Design records
 

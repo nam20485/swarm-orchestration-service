@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>swarm-orchestration · observability</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: #0f1419; color: #c9d1d9;
+    font: 14px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  header {
+    display: flex; align-items: center; gap: 1rem;
+    padding: .6rem 1rem; background: #161b22; border-bottom: 1px solid #21262d;
+  }
+  header h1 { font-size: 1rem; margin: 0; color: #e6edf3; font-weight: 600; }
+  nav { display: flex; gap: .25rem; margin-left: auto; }
+  nav button {
+    background: none; border: 1px solid #21262d; color: #8b949e;
+    padding: .25rem .8rem; border-radius: 6px; cursor: pointer; font: inherit;
+  }
+  nav button.active { background: #1f6feb33; color: #58a6ff; border-color: #1f6feb; }
+  #dot { width: .6rem; height: .6rem; border-radius: 50%; background: #d29922; }
+  #dot.live { background: #3fb950; } #dot.down { background: #f85149; }
+  main { padding: 1rem; max-width: 1100px; margin: 0 auto; }
+  section { display: none; } section.active { display: block; }
+  .bar { display: flex; gap: .5rem; align-items: center; margin-bottom: .75rem; flex-wrap: wrap; }
+  .bar input[type=text] {
+    background: #0d1117; color: #c9d1d9; border: 1px solid #21262d;
+    border-radius: 6px; padding: .3rem .6rem; font: inherit; width: 18rem;
+  }
+  .bar button {
+    background: #21262d; color: #c9d1d9; border: 1px solid #30363d;
+    border-radius: 6px; padding: .3rem .8rem; cursor: pointer; font: inherit;
+  }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: .3rem .5rem; border-bottom: 1px solid #21262d;
+           vertical-align: top; white-space: nowrap; }
+  th { color: #8b949e; font-weight: 500; position: sticky; top: 0; background: #0f1419; }
+  td.wrap { white-space: normal; word-break: break-word; }
+  .kind { color: #79c0ff; } .runid { color: #d2a8ff; cursor: pointer; }
+  .err { color: #f85149; } .ok { color: #3fb950; } .dim { color: #8b949e; }
+  details { margin: 0; } details summary { cursor: pointer; color: #8b949e; }
+  pre { margin: .25rem 0 0; padding: .5rem; background: #0d1117; border-radius: 6px;
+        overflow-x: auto; white-space: pre-wrap; word-break: break-word; }
+  #detail { margin-top: 1rem; border: 1px solid #21262d; border-radius: 8px; padding: .75rem; }
+  #detail h3 { margin: 0 0 .5rem; color: #e6edf3; font-size: .95rem; }
+  .empty { color: #8b949e; padding: 1rem 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>swarm-orchestration · observability</h1>
+  <span id="dot" title="SSE connection"></span>
+  <nav>
+    <button data-tab="live" class="active">live</button>
+    <button data-tab="runs">runs</button>
+    <button data-tab="webhooks">webhooks</button>
+  </nav>
+</header>
+<main>
+  <section id="live" class="active">
+    <div class="bar">
+      <input type="text" id="live-filter" placeholder="filter by event type or run id…">
+      <button id="live-pause">pause</button>
+      <span class="dim" id="live-count"></span>
+    </div>
+    <table><thead><tr>
+      <th>id</th><th>time</th><th>type</th><th>run</th><th>data</th>
+    </tr></thead><tbody id="live-body"></tbody></table>
+    <p class="empty" id="live-empty">connecting…</p>
+  </section>
+
+  <section id="runs">
+    <div class="bar"><button id="runs-refresh">refresh</button>
+      <span class="dim">newest first · click a run for its full trace</span></div>
+    <table><thead><tr>
+      <th>run</th><th>repo</th><th>label</th><th>outcome</th><th>modified</th>
+    </tr></thead><tbody id="runs-body"></tbody></table>
+    <p class="empty" id="runs-empty">no runs recorded yet</p>
+    <div id="detail" hidden></div>
+  </section>
+
+  <section id="webhooks">
+    <div class="bar"><button id="hooks-refresh">refresh</button>
+      <span class="dim">durable webhook tail — survives restarts</span></div>
+    <table><thead><tr>
+      <th>id</th><th>time</th><th>type</th><th>delivery</th><th>detail</th>
+    </tr></thead><tbody id="hooks-body"></tbody></table>
+    <p class="empty" id="hooks-empty">no webhook events recorded yet</p>
+  </section>
+</main>
+<script>
+"use strict";
+// ALL dynamic values go through textContent — event payloads are
+// agent-controlled text and must never be parsed as HTML.
+const $ = (id) => document.getElementById(id);
+const MAX_ROWS = 500;
+const COLLAPSED = new Set([
+  "user_message_chunk", "agent_message_chunk", "agent_thought_chunk", "agent_update",
+]);
+
+const fmtTime = (ts) =>
+  ts ? new Date(ts * 1000).toLocaleTimeString() : "";
+const cell = (row, text, cls) => {
+  const td = document.createElement("td");
+  if (cls) td.className = cls;
+  td.textContent = text ?? "";
+  row.appendChild(td); return td;
+};
+const shortId = (id) => (id ? id.slice(0, 8) : "");
+
+// ── tabs ────────────────────────────────────────────────────────────────
+document.querySelectorAll("nav button").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("nav button").forEach((b) => b.classList.remove("active"));
+    document.querySelectorAll("section").forEach((s) => s.classList.remove("active"));
+    btn.classList.add("active");
+    $(btn.dataset.tab).classList.add("active");
+    if (btn.dataset.tab === "runs") loadRuns();
+    if (btn.dataset.tab === "webhooks") loadWebhooks();
+  });
+});
+
+// ── live SSE feed ───────────────────────────────────────────────────────
+let paused = false;
+let liveItems = [];
+const seenIds = new Set(); // membership dedupe — survives server id resets
+const liveMatch = (item) => {
+  const q = $("live-filter").value.trim().toLowerCase();
+  if (!q) return true;
+  return (
+    item.type.toLowerCase().includes(q) ||
+    ((item.data || {}).run_id || "").toLowerCase().includes(q) ||
+    ((item.data || {}).id || "").toLowerCase().includes(q)
+  );
+};
+const updateLiveCount = () => {
+  const shown = liveItems.filter(liveMatch).slice(0, MAX_ROWS);
+  $("live-count").textContent = `${shown.length} shown · ${liveItems.length} buffered`;
+};
+const renderLive = () => {
+  const body = $("live-body");
+  body.textContent = "";
+  const shown = liveItems.filter(liveMatch).slice(0, MAX_ROWS);
+  $("live-empty").textContent = liveItems.length ? "" : "no events yet";
+  updateLiveCount();
+  for (const item of shown) {
+    const tr = document.createElement("tr");
+    cell(tr, String(item.id), "dim");
+    cell(tr, fmtTime(item.ts), "dim");
+    cell(tr, item.type, "kind");
+    const rid = (item.data || {}).run_id || (item.data || {}).id || "";
+    const runCell = cell(tr, shortId(rid), rid ? "runid" : "dim");
+    if (rid) {
+      runCell.title = rid;
+      runCell.addEventListener("click", () => { openRun(rid); });
+    }
+    const dataCell = document.createElement("td");
+    dataCell.className = "wrap";
+    appendData(dataCell, item);
+    tr.appendChild(dataCell);
+    body.appendChild(tr);
+  }
+};
+const expandedIds = new Set(); // survives tbody rebuilds mid-stream
+const wireExpansion = (details, key) => {
+  details.open = expandedIds.has(key);
+  details.addEventListener("toggle", () => {
+    if (details.open) expandedIds.add(key);
+    else expandedIds.delete(key);
+  });
+};
+const appendData = (container, item, keyPrefix = "live") => {
+  const d = item.data || {};
+  const text = d.text ?? d.error ?? d.reason ?? d.stop_reason ?? null;
+  const structured = ["entries", "plan", "commands", "options", "payload"].some(
+    (k) => d[k] !== undefined
+  );
+  if (text !== null) {
+    const span = document.createElement("span");
+    span.textContent = String(text).slice(0, 300);
+    container.appendChild(span);
+    if (String(text).length > 300) container.appendChild(document.createTextNode("…"));
+  }
+  if (structured || text === null) {
+    const details = document.createElement("details");
+    wireExpansion(details, `${keyPrefix}:${item.id}`);
+    const summary = document.createElement("summary");
+    summary.textContent = "json";
+    details.appendChild(summary);
+    const pre = document.createElement("pre");
+    pre.textContent = JSON.stringify(d, null, 2);
+    details.appendChild(pre);
+    container.appendChild(details);
+  }
+};
+const connect = () => {
+  const es = new EventSource("/events");
+  es.addEventListener("open", () => $("dot").className = "live");
+  es.addEventListener("error", () => $("dot").className = "down");
+  for (const type of [
+    "webhook_received", "webhook_filtered", "webhook_accepted", "webhook_duplicate",
+    "prompt_queued", "prompt_consumed", "sandbox_provisioned", "sandbox_released",
+    "user_message_chunk", "agent_session_started", "agent_message_chunk",
+    "agent_thought_chunk", "agent_tool_call", "agent_plan", "agent_plan_update",
+    "agent_plan_removed", "agent_commands_update", "agent_mode_update",
+    "agent_session_info", "agent_config_update", "agent_update", "agent_usage",
+    "agent_permission", "agent_finished",
+  ]) {
+    es.addEventListener(type, (ev) => {
+      const id = parseInt(ev.lastEventId, 10) || 0;
+      // The ring replays on every (re)connect and the server ignores
+      // Last-Event-ID, so dedupe by membership — not a high-water mark,
+      // which a server restart (ids reset to 1) would silence forever.
+      if (seenIds.has(id)) return;
+      seenIds.add(id);
+      if (seenIds.size > 5000) seenIds.clear(); // bounded; replay window ≪ this
+      const data = JSON.parse(ev.data);
+      // The SSE frame carries the data dict only; ts falls back to arrival
+      // time (ring-replayed items show "now" — durable views carry true ts).
+      liveItems.unshift({ id: ev.lastEventId, ts: data.ts ?? Date.now() / 1000, type, data });
+      liveItems = liveItems.slice(0, 2000);
+      updateLiveCount();
+      if (!paused) renderLive();
+    });
+  }
+};
+$("live-filter").addEventListener("input", renderLive);
+$("live-pause").addEventListener("click", () => {
+  paused = !paused;
+  $("live-pause").textContent = paused ? "resume" : "pause";
+  if (!paused) renderLive();
+});
+
+// ── runs ────────────────────────────────────────────────────────────────
+const loadRuns = async () => {
+  try {
+    const res = await fetch("/runs");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const runs = await res.json();
+    const body = $("runs-body"); body.textContent = "";
+    $("runs-empty").textContent = runs.length ? "" : "no runs recorded yet";
+    for (const run of runs) {
+      const m = run.manifest || {};
+      const tr = document.createElement("tr");
+      const rid = cell(tr, shortId(run.run_id), "runid");
+      rid.title = run.run_id;
+      rid.addEventListener("click", () => openRun(run.run_id));
+      cell(tr, m.repo ?? "", "wrap");
+      cell(tr, m.label ?? "", "wrap");
+      const out = cell(tr, "", m.ok === true ? "ok" : m.ok === false ? "err" : "dim");
+      out.textContent = m.ok === undefined ? "—" : m.ok ? "ok" : m.stop_reason || m.error || "failed";
+      cell(tr, new Date(run.modified_at * 1000).toLocaleString(), "dim");
+      body.appendChild(tr);
+    }
+  } catch { $("runs-empty").textContent = "failed to load runs"; }
+};
+const openRun = async (runId) => {
+  document.querySelectorAll("nav button").forEach((b) => b.classList.remove("active"));
+  document.querySelectorAll("section").forEach((s) => s.classList.remove("active"));
+  document.querySelector('nav button[data-tab="runs"]').classList.add("active");
+  $("runs").classList.add("active");
+  const box = $("detail"); box.hidden = false; box.textContent = "loading…";
+  let events;
+  try {
+    const res = await fetch(`/runs/${runId}/events`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    events = await res.json();
+  } catch {
+    box.textContent = `failed to load run ${runId}`;
+    return;
+  }
+  box.textContent = "";
+  const h = document.createElement("h3");
+  h.textContent = `run ${runId} · ${events.length} events`;
+  box.appendChild(h);
+  const table = document.createElement("table");
+  const head = table.insertRow();
+  for (const label of ["id", "time", "type", "data"]) {
+    const th = document.createElement("th"); th.textContent = label; head.appendChild(th);
+  }
+  const tbody = table.createTBody();
+  for (const item of events) {
+    const tr = tbody.insertRow();
+    cell(tr, String(item.id), "dim");
+    cell(tr, fmtTime(item.ts), "dim");
+    cell(tr, item.type, "kind");
+    const dataCell = document.createElement("td");
+    dataCell.className = "wrap";
+    if (COLLAPSED.has(item.type)) {
+      const details = document.createElement("details");
+      wireExpansion(details, `run:${runId}:${item.id}`);
+      const summary = document.createElement("summary");
+      const d = item.data || {};
+      summary.textContent =
+        (d.text ? String(d.text).slice(0, 120) : item.type) +
+        (d.text && String(d.text).length > 120 ? "…" : "");
+      details.appendChild(summary);
+      const pre = document.createElement("pre");
+      pre.textContent = JSON.stringify(d, null, 2);
+      details.appendChild(pre);
+      dataCell.appendChild(details);
+    } else {
+      appendData(dataCell, item, `run:${runId}`);
+    }
+    tr.appendChild(dataCell);
+  }
+  box.appendChild(table);
+};
+$("runs-refresh").addEventListener("click", loadRuns);
+
+// ── webhooks (durable global tail) ─────────────────────────────────────
+const loadWebhooks = async () => {
+  try {
+    const res = await fetch("/events/history");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const all = await res.json();
+    const hooks = all.filter((item) => String(item.type).startsWith("webhook_"));
+    const body = $("hooks-body"); body.textContent = "";
+    $("hooks-empty").textContent = hooks.length ? "" : "no webhook events recorded yet";
+    for (const item of hooks.slice(-MAX_ROWS).reverse()) {
+      const d = item.data || {};
+      const tr = document.createElement("tr");
+      cell(tr, String(item.id), "dim");
+      cell(tr, fmtTime(item.ts), "dim");
+      cell(tr, item.type, "kind");
+      cell(tr, d.delivery_id ?? "", "dim");
+      const detailCell = document.createElement("td");
+      detailCell.className = "wrap";
+      const bits = [d.event, d.action, d.reason, d.repo, d.sender, d.label]
+        .filter((x) => x !== undefined).map(String).join(" · ");
+      detailCell.textContent = bits;
+      tr.appendChild(detailCell);
+      body.appendChild(tr);
+    }
+  } catch { $("hooks-empty").textContent = "failed to load webhook tail"; }
+};
+$("hooks-refresh").addEventListener("click", loadWebhooks);
+
+connect();
+</script>
+</body>
+</html>
