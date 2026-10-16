@@ -31,9 +31,19 @@ Event type                 Data
 ``webhook_duplicate``      delivery_id, event, action
 ``sandbox_provisioned``    run_id, sandbox_id, container_name, workspace
 ``sandbox_released``       run_id, sandbox_id, ok
+``user_message_chunk``     run_id, text (the dispatch prompt echo)
 ``agent_session_started``  run_id, session_id, protocol_version
 ``agent_message_chunk``    run_id, text
+``agent_thought_chunk``    run_id, text
 ``agent_tool_call``        run_id, tool_call_id, title, kind, status
+``agent_plan``             run_id, entries (full plan snapshot)
+``agent_plan_update``      run_id, plan (items/file/markdown delta, wire names)
+``agent_plan_removed``     run_id, plan_id
+``agent_commands_update``  run_id, commands (available-commands list)
+``agent_mode_update``      run_id, mode_id
+``agent_session_info``     run_id, title, updated_at
+``agent_config_update``    run_id, options (config-option list, wire names)
+``agent_update``           run_id, kind, payload (unrecognized kinds)
 ``agent_usage``            run_id, used, size, cost
 ``agent_permission``       run_id, title, action, reason
 ``agent_finished``         run_id, session_id, stop_reason, ok,
@@ -43,7 +53,8 @@ Event type                 Data
 Emitter sources: the webhook routes here (``webhook_*``), the queue consumer
 (``prompt_*``, see ``prompt_queue.py``), the SwarmSandbox bridge
 (``sandbox_*``, see ``sandbox_bridge.py``), and the ACP host session mapping
-(``agent_*``, see ``acp_host.py``).
+(``agent_*`` + ``user_message_chunk``, see ``acp_host.py`` — ALL-traces: every
+``session/update`` kind maps, unknown kinds pass through as ``agent_update``).
 """
 
 from __future__ import annotations
@@ -93,7 +104,7 @@ def create_app(
     to the Phase 1 mark-consumed placeholder.
     """
     cfg = settings or Settings.from_env()
-    store = event_store or EventStore()
+    store = event_store or EventStore(maxlen=cfg.events_maxlen)
     queue = prompt_queue or PromptQueue(
         store, host=AcpHost(cfg, store) if cfg.acp_enabled else None
     )

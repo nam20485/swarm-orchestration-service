@@ -16,22 +16,35 @@ never a lived-in checkout — carrying the fail-closed ``permission``
 deny-list from ``Settings.acp_denied_tools``).
 
 **EventStore contract (plan §5 Decision 7 — protocol events only; stable
-names; every event carries ``run_id`` = the PromptInfo id):**
+names; every event carries ``run_id`` = the PromptInfo id). ALL-traces
+(``docs/plans/webui-plan.md`` W0): every ``session/update`` kind maps to an
+event and nothing is filtered server-side — the UI filters; unrecognized
+kinds pass through as ``agent_update`` instead of being dropped:**
 
 ===========================  =====================================================
 Event type                   Data
 ===========================  =====================================================
+``user_message_chunk``       text (the dispatch prompt echo)
 ``agent_session_started``    session_id, protocol_version
 ``agent_message_chunk``      text (agent reply deltas)
+``agent_thought_chunk``      text (agent reasoning deltas)
 ``agent_tool_call``          tool_call_id, title, kind, status
+``agent_plan``               entries (full plan snapshot)
+``agent_plan_update``        plan (items/file/markdown delta, wire names)
+``agent_plan_removed``       plan_id
+``agent_commands_update``    commands (available-commands list)
+``agent_mode_update``        mode_id
+``agent_session_info``       title, updated_at
+``agent_config_update``      options (config-option list, wire names)
+``agent_update``             kind, payload (unrecognized kinds — never dropped)
 ``agent_usage``              used, size, cost
 ``agent_permission``         title, action, reason (policy decision)
 ``agent_finished``           session_id, stop_reason, ok, error (on failure)
 ===========================  =====================================================
 
-Other ``session/update`` kinds (plan deltas, mode changes, thought chunks,
-available commands) are consumed and ignored — extend the mapping here if
-the dashboard needs them.
+Structured payloads (``entries``, ``plan``, ``commands``, ``options``) are
+JSON-safe dumps with the protocol's wire aliases, so event data mirrors the
+wire shapes one-to-one.
 
 **Harness trace (``docs/plans/harness-trace-parity.md`` D1/D2/D3/D7):** the agent
 is spawned with ``--print-logs --log-level <ACP_HARNESS_LOG_LEVEL>`` so its own
@@ -131,6 +144,28 @@ def build_prompt(info: PromptInfo) -> str:
     )
 
 
+def _json_safe(obj: Any) -> Any:
+    """Best-effort JSON-safe form of a schema object for event payloads.
+
+    Pydantic models dump with their wire aliases (protocol-faithful shapes);
+    plain containers recurse; anything else stringifies rather than raising —
+    serializing a payload must never break the event stream.
+    """
+    if obj is None or isinstance(obj, (str, int, float, bool)):
+        return obj
+    dump = getattr(obj, "model_dump", None)
+    if callable(dump):
+        try:
+            return dump(mode="json", by_alias=True)
+        except Exception:  # noqa: BLE001 - payload shape is never worth a crash
+            pass
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(item) for item in obj]
+    if isinstance(obj, dict):
+        return {str(key): _json_safe(value) for key, value in obj.items()}
+    return str(obj)
+
+
 class HostClient:
     """ACP client callbacks: session_update mapping + permission policy.
 
@@ -146,18 +181,27 @@ class HostClient:
         self._run_id = run_id
 
     async def session_update(self, session_id: str, update: Any, **_: Any) -> None:
+        """ALL-traces mapping (webui plan W0): every ``session/update`` kind
+        becomes an event; nothing is filtered server-side (the UI filters).
+        Unrecognized kinds pass through as ``agent_update`` so future protocol
+        additions are visible instead of silently dropped.
+        """
         kind = getattr(update, "session_update", type(update).__name__)
-        if kind == "agent_message_chunk":
-            text = getattr(update.content, "text", None)
+        emit = self._store.emit
+        run_id = self._run_id
+        if kind in ("user_message_chunk", "agent_message_chunk", "agent_thought_chunk"):
+            text = getattr(getattr(update, "content", None), "text", None)
             if text:
-                self._store.emit(
-                    "agent_message_chunk", run_id=self._run_id, text=text
-                )
+                emit(kind, run_id=run_id, text=text)
+            else:
+                # No/empty/non-text content (e.g. an image block): the update
+                # still happened, so it passes through rather than dropping.
+                emit("agent_update", run_id=run_id, kind=kind, payload=_json_safe(update))
             return
         if kind in ("tool_call", "tool_call_update"):
-            self._store.emit(
+            emit(
                 "agent_tool_call",
-                run_id=self._run_id,
+                run_id=run_id,
                 tool_call_id=getattr(update, "tool_call_id", None),
                 title=getattr(update, "title", None),
                 kind=getattr(update, "kind", None),
@@ -165,19 +209,65 @@ class HostClient:
             )
             return
         if kind == "usage_update":
-            self._store.emit(
+            emit(
                 "agent_usage",
-                run_id=self._run_id,
+                run_id=run_id,
                 used=getattr(update, "used", None),
                 size=getattr(update, "size", None),
                 cost=getattr(update, "cost", None),
             )
             return
-        # Plan deltas, mode changes, thought/command updates: intentionally
-        # unmapped (module docstring). Debug-log only.
-        logger.debug(
-            "ACP session_update kind=%s ignored run_id=%s", kind, self._run_id
-        )
+        if kind == "plan":
+            emit(
+                "agent_plan",
+                run_id=run_id,
+                entries=_json_safe(getattr(update, "entries", None)),
+            )
+            return
+        if kind == "plan_update":
+            emit(
+                "agent_plan_update",
+                run_id=run_id,
+                plan=_json_safe(getattr(update, "plan", None)),
+            )
+            return
+        if kind == "plan_removed":
+            emit(
+                "agent_plan_removed",
+                run_id=run_id,
+                plan_id=getattr(update, "plan_id", None),
+            )
+            return
+        if kind == "available_commands_update":
+            emit(
+                "agent_commands_update",
+                run_id=run_id,
+                commands=_json_safe(getattr(update, "available_commands", None)),
+            )
+            return
+        if kind == "current_mode_update":
+            emit(
+                "agent_mode_update",
+                run_id=run_id,
+                mode_id=getattr(update, "current_mode_id", None),
+            )
+            return
+        if kind == "session_info_update":
+            emit(
+                "agent_session_info",
+                run_id=run_id,
+                title=getattr(update, "title", None),
+                updated_at=getattr(update, "updated_at", None),
+            )
+            return
+        if kind == "config_option_update":
+            emit(
+                "agent_config_update",
+                run_id=run_id,
+                options=_json_safe(getattr(update, "config_options", None)),
+            )
+            return
+        emit("agent_update", run_id=run_id, kind=kind, payload=_json_safe(update))
 
     async def request_permission(
         self, session_id: str, tool_call: Any, options: list[Any], **_: Any
