@@ -12,6 +12,10 @@ network or via an SSH/compose tunnel):
   comment is emitted after ``WEBHOOK_EVENTS_KEEPALIVE`` idle seconds. Each
   frame carries the store's monotonic ``id``, the event ``type``, and the
   event data as a JSON ``data`` line.
+- ``GET /runs`` / ``GET /runs/{run_id}/events`` — durable run history from
+  the events JSONL tail (webui plan W1, ``WEBHOOK_EVENTS_LOG_ENABLED``):
+  index of runs under ``ACP_TRACE_ROOT`` (newest first, manifests merged),
+  and the full per-run event list that survives restarts and ring churn.
 
 **Stable event names** (dashboard contract — additive changes only; this
 table is the single source of truth, mirrored by ``src/webhook_receiver/
@@ -71,11 +75,13 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from webhook_receiver.acp_host import AcpHost
 from webhook_receiver.config import Settings
+from webhook_receiver.event_log import EventLog, list_runs, read_run_events
 from webhook_receiver.event_store import EventStore
 from webhook_receiver.filters import should_dispatch
 from webhook_receiver.github import verify_signature
 from webhook_receiver.prompt_builder import build_orchestration_prompt
 from webhook_receiver.prompt_queue import PromptInfo, PromptQueue
+from webhook_receiver.trace_log import resolve_trace_root
 
 logger = logging.getLogger(__name__)
 
@@ -101,10 +107,21 @@ def create_app(
     set, the consumer drives the ACP host — one cold opencode session per
     envelope. An injected ``prompt_queue`` keeps its own host (tests and
     host variants wire their own); with ACP disabled the consumer falls back
-    to the Phase 1 mark-consumed placeholder.
+    to the Phase 1 mark-consumed placeholder. The same ownership applies to
+    an injected ``event_store``: it keeps its own sink wiring (or none) —
+    the durable events tail is attached only to the default-constructed
+    store, whose construction this function owns.
     """
     cfg = settings or Settings.from_env()
-    store = event_store or EventStore(maxlen=cfg.events_maxlen)
+    sink = (
+        EventLog(
+            resolve_trace_root(cfg.acp_trace_root),
+            keep_runs=cfg.acp_trace_keep_runs,
+        ).append
+        if cfg.events_log_enabled
+        else None
+    )
+    store = event_store or EventStore(maxlen=cfg.events_maxlen, sink=sink)
     queue = prompt_queue or PromptQueue(
         store, host=AcpHost(cfg, store) if cfg.acp_enabled else None
     )
@@ -158,6 +175,30 @@ def create_app(
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache"},
         )
+
+    @app.get("/runs")
+    async def runs() -> list[dict[str, Any]]:
+        """Run history index (webui plan W1): run directories under the trace
+        root that carry an ``events.jsonl``, newest first, each merged with
+        its ``manifest.json`` when present. Listener-local like ``/events``;
+        empty when the events log is off or nothing ran yet."""
+        return list_runs(cfg.acp_trace_root)
+
+    @app.get("/runs/{run_id}/events")
+    async def run_events(run_id: str) -> list[dict[str, Any]]:
+        """Full per-run event history from ``events.jsonl``, oldest first —
+        the durable counterpart of the ring replay. 404 for an unknown run
+        or a malformed run id."""
+        # Offloaded like /events' blocking work: a long run's tail must
+        # never stall the loop (and through it, webhook handling).
+        events = await asyncio.to_thread(
+            read_run_events, cfg.acp_trace_root, run_id
+        )
+        if events is None:
+            raise HTTPException(
+                status_code=404, detail=f"No event history for run {run_id!r}"
+            )
+        return events
 
     @app.post(
         "/webhooks/github",

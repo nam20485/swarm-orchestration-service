@@ -364,6 +364,7 @@ function Step-Python {
         'webhook_receiver.acp_smoke',
         'webhook_receiver.app',
         'webhook_receiver.config',
+        'webhook_receiver.event_log',
         'webhook_receiver.event_store',
         'webhook_receiver.filters',
         'webhook_receiver.github',

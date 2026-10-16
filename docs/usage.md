@@ -103,6 +103,14 @@ webhook_received -> webhook_accepted -> prompt_queued
   -> [sandbox_released] -> prompt_consumed {ok: true}
 ```
 
+Run history that outlives the ring (and restarts) lives under
+`ACP_TRACE_ROOT` (`WEBHOOK_EVENTS_LOG_ENABLED`, default on):
+
+```sh
+curl http://127.0.0.1:8080/runs                 # run index, newest first
+curl http://127.0.0.1:8080/runs/<run_id>/events # full per-run event list
+```
+
 `/events` is listener-local by design — it is not routed through the public
 Caddy surface. Reach it on the listener port directly (host run), or via an
 SSH tunnel / tailnet serve.

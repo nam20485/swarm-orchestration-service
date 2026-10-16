@@ -1,8 +1,9 @@
 # Plan: Service Web UI (Orchestration Observability)
 
-Status: APPROVED — owner decisions folded 2026-10-15 (see Decisions);
-implementation not started (W0 first)
-Date: 2026-10-14 (decisions folded 2026-10-15)
+Status: IN PROGRESS — owner decisions folded 2026-10-15 (see Decisions);
+W0 LANDED (PR #35, `549382b`); W1 implemented (branch `dev/webui-w1`,
+PR pending); W2 (the UI) is next
+Date: 2026-10-14 (decisions folded 2026-10-15; W0 landed; W1 coded 2026-10-15)
 
 ## Goal
 

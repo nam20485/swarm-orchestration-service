@@ -55,6 +55,11 @@ class Settings:
     # chunk/plan events; raise this if replay windows feel short. The W1
     # per-run JSONL log is the durable record beyond the ring.
     events_maxlen: int = 1000
+    # Durable event tail (webui plan W1): append every event as JSONL under
+    # the trace root (<ACP_TRACE_ROOT>/<run_id>/events.jsonl plus a rotated
+    # root-level tail for pre-envelope webhook events). Own flag on purpose
+    # — independent of ACP_TRACE_ENABLED; retention rides ACP_TRACE_KEEP_RUNS.
+    events_log_enabled: bool = True
     # --- ACP host (Phase 2) ---
     acp_enabled: bool = True
     # Empty → resolve via PATH, then ~/.opencode/bin/opencode.
@@ -183,6 +188,7 @@ class Settings:
             log_level=os.environ.get("WEBHOOK_LOG_LEVEL", "info").lower(),
             events_keepalive=events_keepalive,
             events_maxlen=events_maxlen,
+            events_log_enabled=_env_bool("WEBHOOK_EVENTS_LOG_ENABLED", True),
             acp_enabled=_env_bool("ACP_ENABLED", True),
             acp_opencode_bin=os.environ.get("ACP_OPENCODE_BIN", "").strip(),
             acp_workspace_root=os.environ.get("ACP_WORKSPACE_ROOT", "").strip(),

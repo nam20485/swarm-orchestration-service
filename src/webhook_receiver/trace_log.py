@@ -62,6 +62,43 @@ def redact(text: str) -> str:
     return _KV_SECRET_RE.sub(r"\1<redacted>", text)
 
 
+def resolve_trace_root(trace_root: str) -> Path:
+    """Resolve ``ACP_TRACE_ROOT``; empty → ``logs/runs`` relative to cwd.
+
+    Shared with ``event_log`` (webui plan W1) so the events tail and the
+    harness trace always land in the same per-run directories.
+    """
+    return Path(trace_root).expanduser() if trace_root else Path(_DEFAULT_TRACE_ROOT)
+
+
+def prune_runs(root: Path, keep_runs: int, protect: Path | None = None) -> None:
+    """Keep the newest *keep_runs* run directories under *root*, oldest first.
+
+    Only uuid4-hex-shaped directories are eligible, so a mis-pointed root can
+    never delete unrelated directories. *protect* is never removed (the
+    just-opened run).
+    """
+    keep = max(1, keep_runs)
+    try:
+        siblings = [
+            entry
+            for entry in root.iterdir()
+            if entry.is_dir() and _RUN_ID_RE.fullmatch(entry.name)
+        ]
+    except OSError:
+        return
+    if len(siblings) <= keep:
+        return
+    siblings.sort(key=lambda p: p.stat().st_mtime)
+    for stale in siblings[: len(siblings) - keep]:
+        if protect is not None and stale == protect:
+            continue
+        try:
+            shutil.rmtree(stale)
+        except OSError as exc:
+            logger.warning("trace prune failed for %s: %s", stale, exc)
+
+
 def _utcnow() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -117,24 +154,7 @@ class RunTrace:
 
     def _prune(self) -> None:
         """Keep the newest ``keep_runs`` run directories, oldest removed."""
-        try:
-            siblings = [
-                entry
-                for entry in self.directory.parent.iterdir()
-                if entry.is_dir() and _RUN_ID_RE.fullmatch(entry.name)
-            ]
-        except OSError:
-            return
-        if len(siblings) <= self._keep_runs:
-            return
-        siblings.sort(key=lambda p: p.stat().st_mtime)
-        for stale in siblings[: len(siblings) - self._keep_runs]:
-            if stale == self.directory:
-                continue
-            try:
-                shutil.rmtree(stale)
-            except OSError as exc:
-                logger.warning("trace prune failed for %s: %s", stale, exc)
+        prune_runs(self.directory.parent, self._keep_runs, protect=self.directory)
 
 
 def open_run_trace(
@@ -146,9 +166,7 @@ def open_run_trace(
     envelope. Never raises: a trace that cannot be created is logged and the
     dispatch proceeds without one.
     """
-    root = (
-        Path(trace_root).expanduser() if trace_root else Path(_DEFAULT_TRACE_ROOT)
-    )
+    root = resolve_trace_root(trace_root)
     directory = root / info.id
     try:
         directory.mkdir(parents=True, exist_ok=True)

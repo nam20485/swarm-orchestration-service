@@ -62,7 +62,13 @@ The single source of truth for event names and payload fields is the
   payloads keep the protocol's wire field names)
 
 `GET /events` streams these over SSE (`text/event-stream`): full ring-buffer
-replay on subscribe, then live fan-out, `: keepalive` comments when idle
+replay on subscribe, then live fan-out, `: keepalive` comments when idle.
+Durable history (webui plan W1, `WEBHOOK_EVENTS_LOG_ENABLED`): every emit is
+appended as JSONL under `ACP_TRACE_ROOT` — `<run_id>/events.jsonl` per run
+(beside `harness.log`/`manifest.json` from `trace_log`), a rotated
+root-level `events.jsonl` for pre-envelope webhook events — and read back
+via `GET /runs` (index, newest first, manifests merged) and
+`GET /runs/{run_id}/events` (full per-run history, survives restarts)
 (`WEBHOOK_EVENTS_KEEPALIVE`, default 15 s). Each frame carries `id`
 (monotonic store sequence), `event` (the name above), and `data` (JSON).
 Consume it with any SSE client:
