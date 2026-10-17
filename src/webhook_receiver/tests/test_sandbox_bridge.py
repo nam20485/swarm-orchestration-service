@@ -168,7 +168,11 @@ def install_spawn(
 ) -> None:
     @contextlib.asynccontextmanager
     async def fake_spawn(
-        client: object, command: str, *args: str, cwd: str | None = None
+        client: object,
+        command: str,
+        *args: str,
+        cwd: str | None = None,
+        env: dict | None = None,
     ):
         conn.client = client
         try:

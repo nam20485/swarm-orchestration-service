@@ -71,6 +71,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -402,7 +403,14 @@ class AcpHost:
                 ]
             async with asyncio.timeout(step * 3 + prompt_timeout):
                 async with spawn_agent_process(
-                    client, bin_path, *agent_args, cwd=str(workspace)
+                    client,
+                    bin_path,
+                    *agent_args,
+                    # The SDK's spawner trims the environment to an MCP-safe
+                    # subset (no GITHUB_TOKEN / provider keys) unless the env
+                    # is passed explicitly — sessions would run credential-less.
+                    env=dict(os.environ),
+                    cwd=str(workspace),
                 ) as (conn, proc):
                     drainer = asyncio.create_task(drain_stderr())
                     init = await asyncio.wait_for(

@@ -7,6 +7,7 @@ no pytest-asyncio dependency)."""
 from __future__ import annotations
 
 import asyncio
+import os
 import contextlib
 import json
 import logging
@@ -216,9 +217,13 @@ def install_spawn(
 ) -> None:
     @contextlib.asynccontextmanager
     async def fake_spawn(
-        client: object, command: str, *args: str, cwd: str | None = None
+        client: object,
+        command: str,
+        *args: str,
+        cwd: str | None = None,
+        env: dict | None = None,
     ):
-        calls.append((client, command, args, cwd))
+        calls.append((client, command, args, cwd, env))
         conn.client = client
         proc.materialize_stderr()  # bind the reader to the running loop
         try:
@@ -286,11 +291,13 @@ class TestRunHappyPath:
 
         asyncio.run(AcpHost(cfg, EventStore()).run(make_info()))
 
-        (client, command, args, cwd) = calls[0]
+        (client, command, args, cwd, env) = calls[0]
         assert isinstance(client, HostClient)
         assert command == "/bin/opencode-fake"
         assert args[0] == "acp"  # trace flags may follow; --cwd never does
         assert Path(cwd).is_dir()
+        # the full parent env rides along (the SDK trims it otherwise)
+        assert env is not None and env.get("PATH") == os.environ.get("PATH")
         # new_session received the same workspace cwd
         assert conn.calls[1][1] == cwd
 
@@ -723,7 +730,11 @@ class TestRunFailures:
 
         @contextlib.asynccontextmanager
         async def failing_spawn(
-            client: object, command: str, *args: str, cwd: str | None = None
+            client: object,
+            command: str,
+            *args: str,
+            cwd: str | None = None,
+            env: dict | None = None,
         ):
             raise AcpHostError("cannot spawn")
             yield  # pragma: no cover
