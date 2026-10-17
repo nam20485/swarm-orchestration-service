@@ -1,8 +1,10 @@
 """ACP host (Phase 2): drives one cold ``opencode`` session per PromptInfo.
 
 Plan §7 Phase 2 / §3.2: for each dequeued envelope the host spawns
-``<opencode> acp --cwd <workspace>`` over stdio JSON-RPC (Agent Client
-Protocol), initializes, opens a session, sends one prompt, streams the
+``<opencode> acp`` over stdio JSON-RPC (Agent Client Protocol) with the
+workspace as the process cwd (opencode >= 2.0 removed the ``--cwd`` flag;
+the cwd is set on the process and again on ``session/new``), initializes,
+opens a session, sends one prompt, streams the
 ``session/update`` notifications into the :class:`EventStore`, and collects
 the stop reason. No ``opencode serve`` container exists anywhere; the
 process is killed on every exit path (timeout ladder + context-manager
@@ -389,16 +391,18 @@ class AcpHost:
                 log("[harness] run_id=%s: %s", info.id, text)
 
         try:
-            agent_args = ["acp", "--cwd", str(workspace)]
+            # opencode >= 2.0 rejects `--cwd` outright — the workspace rides
+            # the process cwd (and session/new below).
+            agent_args = ["acp"]
             if trace_enabled:
                 agent_args += [
                     "--print-logs",
                     "--log-level",
-                    self._settings.acp_harness_log_level,
+                    self._settings.acp_harness_log_level.lower(),
                 ]
             async with asyncio.timeout(step * 3 + prompt_timeout):
                 async with spawn_agent_process(
-                    client, bin_path, *agent_args
+                    client, bin_path, *agent_args, cwd=str(workspace)
                 ) as (conn, proc):
                     drainer = asyncio.create_task(drain_stderr())
                     init = await asyncio.wait_for(

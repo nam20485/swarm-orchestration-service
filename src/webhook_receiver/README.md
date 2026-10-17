@@ -34,7 +34,8 @@ AcpHost.run                                             acp_host.py
   workspace: SwarmSandbox materialized clone (SANDBOX_ENABLED,
   sandbox_bridge.py) or plain scratch dir
   belt-and-braces opencode.json deny-list written into the workspace
-  spawn `opencode acp --cwd <workspace>`; initialize -> session/new ->
+  spawn `opencode acp` with the workspace as process cwd
+  (opencode >= 2.0 has no --cwd flag); initialize -> session/new ->
   one prompt (the envelope's own) -> collect stop reason
   session/update notifications mapped into the EventStore
   session/request_permission answered by acp_policy.py

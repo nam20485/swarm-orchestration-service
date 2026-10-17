@@ -59,9 +59,9 @@ class TestFromEnv:
         assert cfg.acp_default_permission == "reject"
         assert cfg.acp_deny_patterns == ()
         assert cfg.acp_denied_tools == ()
-        # Harness trace (docs/plans/harness-trace-parity.md D1): on, at INFO.
+        # Harness trace (docs/plans/harness-trace-parity.md D1): on, at info.
         assert cfg.acp_trace_enabled is True
-        assert cfg.acp_harness_log_level == "INFO"
+        assert cfg.acp_harness_log_level == "info"
         # S2: artifacts land under logs/runs (relative to the service cwd,
         # gitignored) with a 50-run retention window.
         assert cfg.acp_trace_root == ""
@@ -143,7 +143,7 @@ class TestAcpFromEnv:
         assert cfg.acp_deny_patterns == ("rm\\s+-rf", "git\\s+push\\s+--force")
         assert cfg.acp_denied_tools == ("bash", "write")
         assert cfg.acp_trace_enabled is False
-        assert cfg.acp_harness_log_level == "DEBUG"
+        assert cfg.acp_harness_log_level == "debug"
         assert cfg.acp_trace_root == "~/var/swarm-traces"
         assert cfg.acp_trace_keep_runs == 7
 
@@ -162,6 +162,15 @@ class TestAcpFromEnv:
         monkeypatch.setenv("ACP_HARNESS_LOG_LEVEL", "verbose")
         with pytest.raises(ValueError, match="ACP_HARNESS_LOG_LEVEL must be one of"):
             Settings.from_env()
+
+    def test_harness_log_level_normalizes_legacy_uppercase(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # opencode >= 2.0 rejects uppercase --log-level values; a legacy
+        # uppercase setting keeps working by normalizing at boot.
+        monkeypatch.setenv("OS_WEBHOOK_SECRET", self.SECRET)
+        monkeypatch.setenv("ACP_HARNESS_LOG_LEVEL", "INFO")
+        assert Settings.from_env().acp_harness_log_level == "info"
 
     def test_invalid_default_permission_raises(
         self, monkeypatch: pytest.MonkeyPatch

@@ -167,7 +167,9 @@ def install_spawn(
     monkeypatch: pytest.MonkeyPatch, conn: FakeConn, proc: FakeProc
 ) -> None:
     @contextlib.asynccontextmanager
-    async def fake_spawn(client: object, command: str, *args: str):
+    async def fake_spawn(
+        client: object, command: str, *args: str, cwd: str | None = None
+    ):
         conn.client = client
         try:
             yield conn, proc

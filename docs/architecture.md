@@ -70,7 +70,7 @@ AcpHost.run                                                acp_host.py
   |  workspace: SwarmSandbox clone (SANDBOX_ENABLED=true)
   |  or plain scratch dir (/tmp/swarm-acp-workspaces)
   |  belt-and-braces opencode.json deny-list in the workspace
-  |  spawn `opencode acp --cwd <workspace>`: initialize ->
+  |  spawn `opencode acp` (workspace as process cwd): initialize ->
   |  session/new -> one prompt -> collect stop reason -> kill
   v
 events for every step                                      event_store.py
