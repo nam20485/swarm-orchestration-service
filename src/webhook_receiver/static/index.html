@@ -151,10 +151,15 @@ const updateLiveCount = () => {
   const shown = liveItems.filter(liveMatch).slice(0, MAX_ROWS);
   $("live-count").textContent = `${shown.length} shown · ${liveItems.length} buffered`;
 };
+const atBottom = () =>
+  window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 140;
 const renderLive = () => {
   const body = $("live-body");
+  const stick = atBottom();
   body.textContent = "";
-  const shown = liveItems.filter(liveMatch).slice(0, MAX_ROWS);
+  // liveItems is newest-first; render oldest-first so a narrative stream
+  // (thought/message chunks) reads top-down like the journald pane.
+  const shown = liveItems.filter(liveMatch).slice(0, MAX_ROWS).reverse();
   $("live-empty").textContent = liveItems.length ? "" : "no events yet";
   updateLiveCount();
   for (const item of shown) {
@@ -174,6 +179,7 @@ const renderLive = () => {
     tr.appendChild(dataCell);
     body.appendChild(tr);
   }
+  if (stick) window.scrollTo({ top: document.documentElement.scrollHeight });
 };
 const expandedIds = new Set(); // survives tbody rebuilds mid-stream
 const wireExpansion = (details, key) => {
