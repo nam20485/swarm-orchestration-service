@@ -296,8 +296,10 @@ class TestRunHappyPath:
         assert command == "/bin/opencode-fake"
         assert args[0] == "acp"  # trace flags may follow; --cwd never does
         assert Path(cwd).is_dir()
-        # the full parent env rides along (the SDK trims it otherwise)
+        # the full parent env rides along (the SDK trims it otherwise),
+        # minus the receiver's own webhook signing secret
         assert env is not None and env.get("PATH") == os.environ.get("PATH")
+        assert "OS_WEBHOOK_SECRET" not in env
         # new_session received the same workspace cwd
         assert conn.calls[1][1] == cwd
 

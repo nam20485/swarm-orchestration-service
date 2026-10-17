@@ -409,7 +409,13 @@ class AcpHost:
                     # The SDK's spawner trims the environment to an MCP-safe
                     # subset (no GITHUB_TOKEN / provider keys) unless the env
                     # is passed explicitly — sessions would run credential-less.
-                    env=dict(os.environ),
+                    # OS_WEBHOOK_SECRET stays receiver-side: the agent has no
+                    # use for the webhook signing secret.
+                    env={
+                        k: v
+                        for k, v in os.environ.items()
+                        if k != "OS_WEBHOOK_SECRET"
+                    },
                     cwd=str(workspace),
                 ) as (conn, proc):
                     drainer = asyncio.create_task(drain_stderr())
