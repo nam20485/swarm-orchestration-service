@@ -47,8 +47,12 @@
   #live th:last-child, #live td:last-child,
   #webhooks th:last-child, #webhooks td:last-child,
   #detail th:last-child, #detail td:last-child { width: 100%; }
+  #runs > table th:nth-child(3), #runs > table td:nth-child(3),
   #runs > table th:nth-child(4), #runs > table td:nth-child(4) {
     white-space: normal; word-break: break-word; }
+  #runs > table th:nth-child(3), #runs > table td:nth-child(3) { width: 18%; }
+  #runs > table th:nth-child(4), #runs > table td:nth-child(4) {
+    width: 24%; min-width: 14rem; }
   #runs > table th:nth-child(2), #runs > table td:nth-child(2) { width: 100%; }
   .kind { color: #79c0ff; } .runid { color: #d2a8ff; cursor: pointer; }
   .err { color: #f85149; } .ok { color: #3fb950; } .dim { color: #8b949e; }
@@ -217,7 +221,9 @@ const connect = () => {
   const es = new EventSource("/events");
   es.addEventListener("open", () => {
     $("dot").className = "live";
-    renderLive(); // resolve the initial "connecting…" on an idle feed
+    // fires on every reconnect too — never flush the stream a paused
+    // reader is reading; the idle-feed resolution only matters unpaused.
+    if (!paused) renderLive();
   });
   es.addEventListener("error", () => $("dot").className = "down");
   for (const type of [
