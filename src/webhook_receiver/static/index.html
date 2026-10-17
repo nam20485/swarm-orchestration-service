@@ -209,7 +209,10 @@ const appendData = (container, item, keyPrefix = "live") => {
 };
 const connect = () => {
   const es = new EventSource("/events");
-  es.addEventListener("open", () => $("dot").className = "live");
+  es.addEventListener("open", () => {
+    $("dot").className = "live";
+    renderLive(); // resolve the initial "connecting…" on an idle feed
+  });
   es.addEventListener("error", () => $("dot").className = "down");
   for (const type of [
     "webhook_received", "webhook_filtered", "webhook_accepted", "webhook_duplicate",
@@ -261,7 +264,11 @@ const loadRuns = async () => {
       rid.addEventListener("click", () => openRun(run.run_id));
       cell(tr, m.repo ?? "", "wrap");
       cell(tr, m.label ?? "", "wrap");
-      const out = cell(tr, "", m.ok === true ? "ok" : m.ok === false ? "err" : "dim");
+      const out = cell(
+        tr,
+        "",
+        (m.ok === true ? "ok" : m.ok === false ? "err" : "dim") + " wrap"
+      );
       out.textContent = m.ok === undefined ? "—" : m.ok ? "ok" : m.stop_reason || m.error || "failed";
       cell(tr, new Date(run.modified_at * 1000).toLocaleString(), "dim");
       body.appendChild(tr);
