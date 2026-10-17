@@ -41,13 +41,15 @@
   th { color: #8b949e; font-weight: 500; position: sticky; top: 0; background: #0f1419; }
   td.wrap { white-space: normal; word-break: break-word; }
   /* wide-screen layout: the payload/detail column claims the leftover
-     width instead of every column shrinking to content */
+     width instead of every column shrinking to content (the runs rules
+     scope to the index table only — the run-detail table also lives in
+     section#runs, inside #detail) */
   #live th:last-child, #live td:last-child,
   #webhooks th:last-child, #webhooks td:last-child,
   #detail th:last-child, #detail td:last-child { width: 100%; }
-  #runs th:nth-child(4), #runs td:nth-child(4) {
+  #runs > table th:nth-child(4), #runs > table td:nth-child(4) {
     white-space: normal; word-break: break-word; }
-  #runs th:nth-child(2), #runs td:nth-child(2) { width: 100%; }
+  #runs > table th:nth-child(2), #runs > table td:nth-child(2) { width: 100%; }
   .kind { color: #79c0ff; } .runid { color: #d2a8ff; cursor: pointer; }
   .err { color: #f85149; } .ok { color: #3fb950; } .dim { color: #8b949e; }
   details { margin: 0; } details summary { cursor: pointer; color: #8b949e; }
