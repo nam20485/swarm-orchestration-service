@@ -3,7 +3,7 @@ name: "swarm-reviewer"
 description: "Read-only swarm worker that reviews a diff or file set for correctness, security, and quality, reporting severity-ranked findings. Never fixes what it finds."
 color: orange
 model: "account:zai-individual-coding-plan/GLM-5.3-Flash"
-thoughtLevel: off
+thoughtLevel: low
 injectAgentsMd: false
 tools: [Read, Grep, Glob, Bash]
 maxTurns: 25
