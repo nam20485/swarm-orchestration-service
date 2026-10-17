@@ -195,7 +195,11 @@ def create_app(
         """Observability page (webui plan W2): live SSE feed, run history,
         and the durable webhook tail — one static HTML file, no build step,
         no dependencies. Listener-local like every dashboard endpoint."""
-        return FileResponse(_STATIC_DIR / "index.html")
+        # no-cache: the page is one small file; an updated UI must never
+        # hide behind a 304-revalidated stale copy (bitten the owner twice).
+        return FileResponse(
+            _STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"}
+        )
 
     @app.get("/events/history")
     async def events_history() -> list[dict[str, Any]]:

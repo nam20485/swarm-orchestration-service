@@ -261,7 +261,8 @@ const loadRuns = async () => {
       const tr = document.createElement("tr");
       const rid = cell(tr, shortId(run.run_id), "runid");
       rid.title = run.run_id;
-      rid.addEventListener("click", () => openRun(run.run_id));
+      tr.addEventListener("click", () => openRun(run.run_id));
+      tr.style.cursor = "pointer";
       cell(tr, m.repo ?? "", "wrap");
       cell(tr, m.label ?? "", "wrap");
       const out = cell(
@@ -294,6 +295,7 @@ const openRun = async (runId) => {
   const h = document.createElement("h3");
   h.textContent = `run ${runId} · ${events.length} events`;
   box.appendChild(h);
+  box.scrollIntoView({ behavior: "smooth", block: "start" });
   const table = document.createElement("table");
   const head = table.insertRow();
   for (const label of ["id", "time", "type", "data"]) {
