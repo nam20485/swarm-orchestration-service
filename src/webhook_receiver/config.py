@@ -26,9 +26,20 @@ def _env_list(name: str) -> tuple[str, ...]:
     return tuple(item.strip() for item in raw.split(",") if item.strip())
 
 
-# ``opencode acp --log-level`` choices — the harness trace tap
+# ``opencode --log-level`` choices (opencode >= 2.0, lowercase only — an
+# uppercase value is rejected by the CLI) — the harness trace tap
 # (docs/plans/harness-trace-parity.md D1).
-_HARNESS_LOG_LEVELS = ("DEBUG", "INFO", "WARN", "ERROR")
+_HARNESS_LOG_LEVELS = (
+    "all",
+    "trace",
+    "debug",
+    "info",
+    "warn",
+    "warning",
+    "error",
+    "fatal",
+    "none",
+)
 
 
 @dataclass(frozen=True)
@@ -94,7 +105,7 @@ class Settings:
     # silently at DEBUG; no other behaviour changes.
     acp_trace_enabled: bool = True
     # One of ``opencode --log-level``'s choices; validated at boot.
-    acp_harness_log_level: str = "INFO"
+    acp_harness_log_level: str = "info"
     # Per-run artifact root: ``<root>/<run_id>/{harness.log,manifest.json}``.
     # Empty → ``logs/runs`` relative to the service's working directory
     # (gitignored). A relative path stays relative — the unit pins
@@ -166,7 +177,7 @@ class Settings:
             raise ValueError("WEBHOOK_EVENTS_MAXLEN must be at least 1.")
 
         harness_log_level = (
-            os.environ.get("ACP_HARNESS_LOG_LEVEL", "INFO").strip().upper() or "INFO"
+            os.environ.get("ACP_HARNESS_LOG_LEVEL", "info").strip().lower() or "info"
         )
         if harness_log_level not in _HARNESS_LOG_LEVELS:
             raise ValueError(

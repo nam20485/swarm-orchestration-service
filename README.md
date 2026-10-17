@@ -29,9 +29,9 @@ POST /webhooks/github ---- transport gate: only issues.labeled by a
 PromptInfo queue ---------- typed asyncio.Queue envelope, delivery-id dedup,
   |                        one FIFO consumer
   v
-ACP host ------------------ one cold `opencode acp --cwd <workspace>` session
-  |                        per envelope; fail-closed permission policy;
-  |                        zero host-side model pins
+ACP host ------------------ one cold `opencode acp` session per envelope
+  |                        (workspace as process cwd); fail-closed
+  |                        permission policy; zero host-side model pins
   v
 SwarmSandbox bridge ------- optional (SANDBOX_ENABLED): the sandbox provisions
                            the harness clone that becomes the session cwd
@@ -90,7 +90,7 @@ Every knob is an environment variable parsed in
 | `ACP_DENY_PATTERNS` | *(empty)* | comma-separated regexes (case-insensitive) that always reject a permission request; validated at boot |
 | `ACP_DENIED_TOOLS` | *(empty)* | tools denied pre-prompt via the workspace `opencode.json` permission config (bare workspaces only — never written into an `ACP_CLONE_ROOT` checkout) |
 | `ACP_TRACE_ENABLED` | `true` | spawn opencode with `--print-logs --log-level` so its own log stream reaches the host (`[harness]` lines at INFO); `false` drains stderr silently at DEBUG |
-| `ACP_HARNESS_LOG_LEVEL` | `INFO` | one of opencode's `--log-level` choices (`DEBUG`, `INFO`, `WARN`, `ERROR`); validated at boot |
+| `ACP_HARNESS_LOG_LEVEL` | `info` | one of opencode ≥ 2.0's `--log-level` choices (`all`, `trace`, `debug`, `info`, `warn`, `warning`, `error`, `fatal`, `none` — lowercase only); legacy uppercase values normalize at boot |
 | `ACP_TRACE_ROOT` | *(empty)* | per-run trace artifact root for `harness.log` + `manifest.json`; empty = `logs/runs` relative to the working directory (gitignored) |
 | `ACP_TRACE_KEEP_RUNS` | `50` | newest-N run directories kept, pruned when a run opens |
 | `SANDBOX_ENABLED` | `false` | provision session workspaces through the SwarmSandbox API; mutually exclusive with `ACP_CLONE_ROOT` |

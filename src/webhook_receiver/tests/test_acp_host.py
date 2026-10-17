@@ -7,6 +7,7 @@ no pytest-asyncio dependency)."""
 from __future__ import annotations
 
 import asyncio
+import os
 import contextlib
 import json
 import logging
@@ -215,8 +216,14 @@ def install_spawn(
     calls: list,
 ) -> None:
     @contextlib.asynccontextmanager
-    async def fake_spawn(client: object, command: str, *args: str):
-        calls.append((client, command, args))
+    async def fake_spawn(
+        client: object,
+        command: str,
+        *args: str,
+        cwd: str | None = None,
+        env: dict | None = None,
+    ):
+        calls.append((client, command, args, cwd, env))
         conn.client = client
         proc.materialize_stderr()  # bind the reader to the running loop
         try:
@@ -284,14 +291,17 @@ class TestRunHappyPath:
 
         asyncio.run(AcpHost(cfg, EventStore()).run(make_info()))
 
-        (client, command, args) = calls[0]
+        (client, command, args, cwd, env) = calls[0]
         assert isinstance(client, HostClient)
         assert command == "/bin/opencode-fake"
-        assert args[0] == "acp"
-        assert args[1] == "--cwd"
-        assert Path(args[2]).is_dir()
+        assert args[0] == "acp"  # trace flags may follow; --cwd never does
+        assert Path(cwd).is_dir()
+        # the full parent env rides along (the SDK trims it otherwise),
+        # minus the receiver's own webhook signing secret
+        assert env is not None and env.get("PATH") == os.environ.get("PATH")
+        assert "OS_WEBHOOK_SECRET" not in env
         # new_session received the same workspace cwd
-        assert conn.calls[1][1] == args[2]
+        assert conn.calls[1][1] == cwd
 
     def test_prompt_derived_from_envelope(self, tmp_path, monkeypatch) -> None:
         cfg = make_settings(tmp_path)
@@ -365,7 +375,7 @@ class TestRunHappyPath:
 
         asyncio.run(AcpHost(cfg, EventStore()).run(make_info()))
 
-        assert calls[0][2][2].startswith(str(tmp_path / "swarm-acp-workspaces"))
+        assert calls[0][3].startswith(str(tmp_path / "swarm-acp-workspaces"))
 
     def test_stderr_drained_with_redaction(self, tmp_path, monkeypatch, caplog) -> None:
         cfg = make_settings(tmp_path)
@@ -403,8 +413,8 @@ class TestHarnessTrace:
         asyncio.run(AcpHost(cfg, EventStore()).run(make_info()))
 
         args = calls[0][2]
-        assert args[:2] == ("acp", "--cwd")
-        assert args[3:] == ("--print-logs", "--log-level", "INFO")
+        assert args[0] == "acp"
+        assert args[1:] == ("--print-logs", "--log-level", "info")
 
     def test_harness_log_level_setting_reaches_the_spawn(
         self, tmp_path, monkeypatch
@@ -415,7 +425,8 @@ class TestHarnessTrace:
 
         asyncio.run(AcpHost(cfg, EventStore()).run(make_info()))
 
-        assert calls[0][2][3:] == ("--print-logs", "--log-level", "DEBUG")
+        # a legacy uppercase value still reaches the CLI lowercased
+        assert calls[0][2][1:] == ("--print-logs", "--log-level", "debug")
 
     def test_trace_disabled_spawns_no_log_flags(self, tmp_path, monkeypatch) -> None:
         cfg = make_settings(tmp_path, acp_trace_enabled=False)
@@ -425,8 +436,7 @@ class TestHarnessTrace:
         asyncio.run(AcpHost(cfg, EventStore()).run(make_info()))
 
         args = calls[0][2]
-        assert args[:2] == ("acp", "--cwd")
-        assert len(args) == 3  # no --print-logs / --log-level
+        assert args == ("acp",)  # no --print-logs / --log-level
 
     def test_stderr_surfaced_at_info_with_harness_label(
         self, tmp_path, monkeypatch, caplog
@@ -580,8 +590,8 @@ class TestCloneRootWorkspace:
         result = asyncio.run(AcpHost(cfg, EventStore()).run(make_info()))
 
         assert result.workspace == str(clones / "repo")
-        # spawn --cwd and new_session both point at the checkout
-        assert calls[0][2][2] == str(clones / "repo")
+        # spawn cwd and new_session both point at the checkout
+        assert calls[0][3] == str(clones / "repo")
         assert conn.calls[1][1] == str(clones / "repo")
 
     def test_owner_prefix_stripped_from_repo_name(self, tmp_path, monkeypatch) -> None:
@@ -593,7 +603,7 @@ class TestCloneRootWorkspace:
 
         asyncio.run(AcpHost(cfg, EventStore()).run(make_info(repo="intel-agency/repo")))
 
-        assert calls[0][2][2] == str(clones / "repo")
+        assert calls[0][3] == str(clones / "repo")
 
     def test_traversal_repo_name_fails_closed(self, tmp_path, monkeypatch) -> None:
         # The name segment is validated before path composition: a
@@ -721,7 +731,13 @@ class TestRunFailures:
         cfg = make_settings(tmp_path)
 
         @contextlib.asynccontextmanager
-        async def failing_spawn(client: object, command: str, *args: str):
+        async def failing_spawn(
+            client: object,
+            command: str,
+            *args: str,
+            cwd: str | None = None,
+            env: dict | None = None,
+        ):
             raise AcpHostError("cannot spawn")
             yield  # pragma: no cover
 
