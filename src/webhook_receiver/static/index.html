@@ -47,8 +47,12 @@
   #live th:last-child, #live td:last-child,
   #webhooks th:last-child, #webhooks td:last-child,
   #detail th:last-child, #detail td:last-child { width: 100%; }
+  #runs > table th:nth-child(3), #runs > table td:nth-child(3),
   #runs > table th:nth-child(4), #runs > table td:nth-child(4) {
     white-space: normal; word-break: break-word; }
+  #runs > table th:nth-child(3), #runs > table td:nth-child(3) { width: 18%; }
+  #runs > table th:nth-child(4), #runs > table td:nth-child(4) {
+    width: 24%; min-width: 14rem; }
   #runs > table th:nth-child(2), #runs > table td:nth-child(2) { width: 100%; }
   .kind { color: #79c0ff; } .runid { color: #d2a8ff; cursor: pointer; }
   .err { color: #f85149; } .ok { color: #3fb950; } .dim { color: #8b949e; }
@@ -151,10 +155,15 @@ const updateLiveCount = () => {
   const shown = liveItems.filter(liveMatch).slice(0, MAX_ROWS);
   $("live-count").textContent = `${shown.length} shown · ${liveItems.length} buffered`;
 };
+const atBottom = () =>
+  window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 140;
 const renderLive = () => {
   const body = $("live-body");
+  const stick = atBottom();
   body.textContent = "";
-  const shown = liveItems.filter(liveMatch).slice(0, MAX_ROWS);
+  // liveItems is newest-first; render oldest-first so a narrative stream
+  // (thought/message chunks) reads top-down like the journald pane.
+  const shown = liveItems.filter(liveMatch).slice(0, MAX_ROWS).reverse();
   $("live-empty").textContent = liveItems.length ? "" : "no events yet";
   updateLiveCount();
   for (const item of shown) {
@@ -174,6 +183,7 @@ const renderLive = () => {
     tr.appendChild(dataCell);
     body.appendChild(tr);
   }
+  if (stick) window.scrollTo({ top: document.documentElement.scrollHeight });
 };
 const expandedIds = new Set(); // survives tbody rebuilds mid-stream
 const wireExpansion = (details, key) => {
@@ -209,7 +219,12 @@ const appendData = (container, item, keyPrefix = "live") => {
 };
 const connect = () => {
   const es = new EventSource("/events");
-  es.addEventListener("open", () => $("dot").className = "live");
+  es.addEventListener("open", () => {
+    $("dot").className = "live";
+    // fires on every reconnect too — never flush the stream a paused
+    // reader is reading; the idle-feed resolution only matters unpaused.
+    if (!paused) renderLive();
+  });
   es.addEventListener("error", () => $("dot").className = "down");
   for (const type of [
     "webhook_received", "webhook_filtered", "webhook_accepted", "webhook_duplicate",
@@ -258,10 +273,15 @@ const loadRuns = async () => {
       const tr = document.createElement("tr");
       const rid = cell(tr, shortId(run.run_id), "runid");
       rid.title = run.run_id;
-      rid.addEventListener("click", () => openRun(run.run_id));
+      tr.addEventListener("click", () => openRun(run.run_id));
+      tr.style.cursor = "pointer";
       cell(tr, m.repo ?? "", "wrap");
       cell(tr, m.label ?? "", "wrap");
-      const out = cell(tr, "", m.ok === true ? "ok" : m.ok === false ? "err" : "dim");
+      const out = cell(
+        tr,
+        "",
+        (m.ok === true ? "ok" : m.ok === false ? "err" : "dim") + " wrap"
+      );
       out.textContent = m.ok === undefined ? "—" : m.ok ? "ok" : m.stop_reason || m.error || "failed";
       cell(tr, new Date(run.modified_at * 1000).toLocaleString(), "dim");
       body.appendChild(tr);
@@ -287,6 +307,7 @@ const openRun = async (runId) => {
   const h = document.createElement("h3");
   h.textContent = `run ${runId} · ${events.length} events`;
   box.appendChild(h);
+  box.scrollIntoView({ behavior: "smooth", block: "start" });
   const table = document.createElement("table");
   const head = table.insertRow();
   for (const label of ["id", "time", "type", "data"]) {
