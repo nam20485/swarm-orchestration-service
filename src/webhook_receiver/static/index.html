@@ -31,10 +31,12 @@
     background: #0d1117; color: #c9d1d9; border: 1px solid #21262d;
     border-radius: 6px; padding: .3rem .6rem; font: inherit; width: 18rem;
   }
-  .bar button {
+  .bar button, button.export {
     background: #21262d; color: #c9d1d9; border: 1px solid #30363d;
     border-radius: 6px; padding: .3rem .8rem; cursor: pointer; font: inherit;
   }
+  #detail h3 { display: flex; align-items: center; gap: .5rem; }
+  #detail h3 button.export { margin-left: auto; font-size: .8rem; padding: .15rem .6rem; }
   table { border-collapse: collapse; width: 100%; }
   th, td { text-align: left; padding: .3rem .5rem; border-bottom: 1px solid #21262d;
            vertical-align: top; white-space: nowrap; }
@@ -84,6 +86,7 @@
       <input type="text" id="live-filter" placeholder="filter by event type or run id…">
       <button id="live-pause">pause</button>
       <button id="live-latest" hidden>↓ latest</button>
+      <button id="live-export">export</button>
       <span class="dim" id="live-count"></span>
     </div>
     <table><thead><tr>
@@ -104,6 +107,7 @@
 
   <section id="webhooks">
     <div class="bar"><button id="hooks-refresh">refresh</button>
+      <button id="hooks-export">export</button>
       <span class="dim">durable webhook tail — survives restarts</span></div>
     <table><thead><tr>
       <th>id</th><th>time</th><th>type</th><th>delivery</th><th>detail</th>
@@ -121,9 +125,11 @@ const COLLAPSED = new Set([
   "user_message_chunk", "agent_message_chunk", "agent_thought_chunk", "agent_update",
 ]);
 // live-feed fragment streams: consecutive same-stream events coalesce into
-// one growing row (terminal-line semantics) instead of one row per fragment
+// one growing row (terminal-line semantics) instead of one row per fragment;
+// agent_update stays out — it is the text-less unknown-kind passthrough and
+// each one's JSON payload must render individually (ALL-traces contract)
 const COALESCED = new Set([
-  "user_message_chunk", "agent_message_chunk", "agent_thought_chunk", "agent_update",
+  "user_message_chunk", "agent_message_chunk", "agent_thought_chunk",
 ]);
 
 const fmtTime = (ts) =>
@@ -135,6 +141,16 @@ const cell = (row, text, cls) => {
   row.appendChild(td); return td;
 };
 const shortId = (id) => (id ? id.slice(0, 8) : "");
+// Browser save dialog picks the destination; JSONL keeps the export
+// greppable/diffable like the on-disk events.jsonl files.
+const download = (name, text) => {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], { type: "application/x-ndjson" }));
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+const stamp = () => new Date().toISOString().replace(/[:T]/g, "-").slice(0, 17);
 
 // ── tabs ────────────────────────────────────────────────────────────────
 document.querySelectorAll("nav button").forEach((btn) => {
@@ -322,6 +338,12 @@ window.addEventListener("scroll", syncLatestPill, { passive: true });
 $("live-latest").addEventListener("click", () => {
   window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" });
 });
+$("live-export").addEventListener("click", () => {
+  // oldest-first, one event per line — same shape as events.jsonl
+  const lines = liveItems.slice().reverse()
+    .map((i) => JSON.stringify({ id: i.id, ts: i.ts, type: i.type, data: i.data }));
+  download(`live-${stamp()}.jsonl`, lines.join("\n") + (lines.length ? "\n" : ""));
+});
 
 // ── runs ────────────────────────────────────────────────────────────────
 const loadRuns = async () => {
@@ -343,7 +365,7 @@ const loadRuns = async () => {
       const out = cell(
         tr,
         "",
-        (m.ok === true ? "ok" : m.ok === false ? "err" : "dim") + " wrap"
+        m.ok === true ? "ok" : m.ok === false ? "err" : "dim"
       );
       out.textContent = m.ok === undefined ? "—" : m.ok ? "ok" : m.stop_reason || m.error || "failed";
       cell(tr, new Date(run.modified_at * 1000).toLocaleString(), "dim");
@@ -369,6 +391,17 @@ const openRun = async (runId) => {
   box.textContent = "";
   const h = document.createElement("h3");
   h.textContent = `run ${runId} · ${events.length} events`;
+  const ex = document.createElement("button");
+  ex.className = "export";
+  ex.textContent = "export jsonl";
+  ex.addEventListener("click", async () => {
+    // refetch: the full file is the source of truth, not the page copy
+    const res = await fetch(`/runs/${runId}/events`);
+    if (!res.ok) return;
+    const evs = await res.json();
+    download(`run-${runId.slice(0, 8)}.jsonl`, evs.map((i) => JSON.stringify(i)).join("\n") + "\n");
+  });
+  h.appendChild(ex);
   box.appendChild(h);
   box.scrollIntoView({ behavior: "smooth", block: "start" });
   const table = document.createElement("table");
@@ -433,6 +466,12 @@ const loadWebhooks = async () => {
   } catch { $("hooks-empty").textContent = "failed to load webhook tail"; }
 };
 $("hooks-refresh").addEventListener("click", loadWebhooks);
+$("hooks-export").addEventListener("click", async () => {
+  const res = await fetch("/events/history");
+  if (!res.ok) return;
+  const all = await res.json();
+  download(`webhooks-${stamp()}.jsonl`, all.map((i) => JSON.stringify(i)).join("\n") + "\n");
+});
 
 connect();
 </script>
