@@ -18,6 +18,20 @@ Two states, two places:
     (owner-approved direction 2026-10-16); migrate the stamped clone config
     surface to opencode v2: root `opencode.json`, credential strategy, the
     existing clone fleet. PR #38 already fixed the receiver's spawn side.
+  - [`harness-trace-parity.md`](harness-trace-parity.md) — IN PROGRESS;
+    S1 (stderr trace capture), S2, and S5 (idle watchdog) landed; the S3
+    noise filter, S4 golden `harness.log` rendering, and S6 docs are
+    unstarted.
+  - [`qwen-code-features-for-the-swarm.md`](qwen-code-features-for-the-swarm.md)
+    — NEEDS PLANS; a harvested shortlist of Qwen Code features to evaluate
+    for the swarm (e.g. the evidence-based verification policy), each item
+    awaiting its own plan.
+  - [`skill-plan.md`](skill-plan.md) — REVISED (Option A selected; the owner
+    answers are recorded under Design decisions); the natural-language
+    orchestration skill awaits implementation.
+  - [`skill-plan-review.md`](skill-plan-review.md) — companion cross-check
+    review of `skill-plan.md`'s claims against the tree; kept alongside the
+    plan it audits.
   - [`dispatch-in-live-checkout.md`](dispatch-in-live-checkout.md) — LANDED
     (PR #23, merged 2026-09-19); retained at the top level as the living spec
     for the dual agent environments while M1/M2 items stay open.
