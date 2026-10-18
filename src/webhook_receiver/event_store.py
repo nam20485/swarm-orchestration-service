@@ -71,6 +71,12 @@ class EventStore:
         self._events: deque[dict[str, Any]] = deque(maxlen=maxlen)
         self._subscribers: list[queue.Queue[dict[str, Any] | None]] = []
         self._lock = threading.Lock()
+        # Ids are "<boot-epoch>-<seq>": the per-process counter alone would
+        # reset to 1 on restart and collide with the UI's seen-id set — every
+        # post-restart event at or below the old high-water mark would be
+        # silently deduped away (a tab left open across a redeploy freezes).
+        # The epoch prefix makes ids unique across restarts instead.
+        self._epoch = int(time.time())
         self._counter = itertools.count(1)
         self._sink = sink
 
@@ -82,7 +88,7 @@ class EventStore:
         so persistence can never fail an emit.
         """
         event = {
-            "id": next(self._counter),
+            "id": f"{self._epoch}-{next(self._counter)}",
             "type": event_type,
             "ts": time.time(),
             "data": data,

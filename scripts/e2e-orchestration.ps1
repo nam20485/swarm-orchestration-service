@@ -162,7 +162,7 @@ function Get-DashboardEvents {
             if ($line -eq '') {
                 if ($current.Count -gt 0) {
                     $events.Add([pscustomobject]@{
-                        id   = [int]$current['id']
+                        id   = [string]$current['id'] # "<boot-epoch>-<seq>" — opaque, unique across restarts
                         type = $current['event']
                         data = $current['data'] | ConvertFrom-Json
                     })

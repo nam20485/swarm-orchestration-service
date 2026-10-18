@@ -139,7 +139,7 @@ class TestEventsEndpoint:
             "webhook_accepted",
             "prompt_queued",
         ]
-        assert reader.frames[0]["id"] == "1"
+        assert reader.frames[0]["id"].endswith("-1")
         assert json.loads(reader.frames[2]["data"]) == {
             "id": "env-1",
             "delivery_id": "d-1",

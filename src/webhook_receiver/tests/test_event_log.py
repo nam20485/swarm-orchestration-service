@@ -90,7 +90,7 @@ class TestEventStoreSink:
         store.emit("agent_plan", run_id="c" * 32, entries=[])
         assert seen[0]["type"] == "agent_plan"
         assert seen[0]["data"]["run_id"] == "c" * 32
-        assert seen[0]["id"] == 1 and "ts" in seen[0]
+        assert str(seen[0]["id"]).endswith("-1") and "ts" in seen[0]
 
     def test_raising_sink_does_not_break_emit(self) -> None:
         def boom(_: dict[str, Any]) -> None:
