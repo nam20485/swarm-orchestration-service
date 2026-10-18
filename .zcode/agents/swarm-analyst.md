@@ -20,7 +20,7 @@ Action bias: parse the named log files and compute the metrics — no repo explo
 Your task input names the agent IDs (or session dir) to analyze. Sources:
 
 - `~/.zcode/cli/agents/<sess_*>/<agent_*>/metadata.json` — `totalDurationMs`, `totalToolUseCount`, `usage.{inputTokens,outputTokens,cacheReadTokens,cacheWriteTokens}`, `status`, `prompt`, `description`.
-- `~/.zcode/cli/rollout/model-io-sess_subagent_<agent_*>.jsonl` — one line per model request: `durationMs`, `request.body.thinking` (must be absent/disabled for workers — flag `thinking.type:"enabled"` as an anomaly), `request.body.output_config.effort`, `response` content blocks (tool_use names/inputs, thinking blocks), `attempt` (retries).
+- `~/.zcode/cli/rollout/model-io-sess_subagent_<agent_*>.jsonl` — one line per model request: `durationMs`, `request.body.thinking` + `request.body.output_config.effort` (workers are pinned to `thoughtLevel: low` — GLM-5.3 exposes no off level — so `thinking {"type":"enabled"}` with `effort` `"low"` is the normal worker baseline, probe-verified 2026-10-17; flag any `effort` above `low` (`high`/`max`) as a thinking-leakage anomaly), `response` content blocks (tool_use names/inputs, thinking blocks), `attempt` (retries).
 
 ## Procedure
 
