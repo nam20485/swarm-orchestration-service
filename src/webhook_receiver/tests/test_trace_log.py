@@ -176,6 +176,24 @@ class TestRunTrace:
         trace.close()
         assert directory.exists()
 
+    def test_failed_open_releases_the_handle(self, tmp_path: Path, monkeypatch) -> None:
+        """open_run_trace() swallows an OSError from open() and returns None;
+        a manifest/prune failure that left _handle open would leak it, since
+        no caller ever gets the instance to call close() on it."""
+        directory = tmp_path / ("a" * 32)
+        directory.mkdir()
+        trace = RunTrace(directory)
+
+        def boom() -> None:
+            raise OSError(28, "No space left on device")
+
+        monkeypatch.setattr(trace, "_write_manifest", boom)
+        with pytest.raises(OSError):
+            trace.open(run_id="a" * 32)
+
+        assert trace._handle is None
+        trace.close()  # close() stays idempotent after a failed open
+
 
 class TestOpenRunTrace:
     def test_creates_the_run_directory_with_identity(self, tmp_path: Path) -> None:

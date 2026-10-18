@@ -122,8 +122,15 @@ class RunTrace:
     def open(self, **fields: Any) -> None:
         self._manifest = {"started_at": _utcnow(), **fields}
         self._handle = self.log_path.open("a", encoding="utf-8")
-        self._write_manifest()
-        self._prune()
+        try:
+            self._write_manifest()
+            self._prune()
+        except OSError:
+            # open_run_trace() catches OSError and returns None, so close()
+            # would never run on this instance — release the harness.log
+            # handle here to keep the best-effort contract leak-free.
+            self.close()
+            raise
 
     def write(self, line: str) -> None:
         if self._handle is None:
