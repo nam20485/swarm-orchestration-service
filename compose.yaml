@@ -39,13 +39,24 @@ services:
       - WEBHOOK_EVENTS_MAXLEN=${WEBHOOK_EVENTS_MAXLEN:-1000}
       - WEBHOOK_EVENTS_LOG_ENABLED=${WEBHOOK_EVENTS_LOG_ENABLED:-true}
       - DIRECT_BODY_ALLOWED_SENDERS=${DIRECT_BODY_ALLOWED_SENDERS:-}
+    volumes:
+      # Durable event tail (WEBHOOK_EVENTS_LOG_ENABLED, default true): the
+      # trace root lives inside the container filesystem, so without this
+      # volume every recreate wipes events.jsonl and /runs, /runs/{id}/events
+      # and /events/history go silently empty. The image pre-creates the
+      # directory (Dockerfile.webhook) so the empty named volume initializes
+      # app-writable; retention rides ACP_TRACE_KEEP_RUNS as on the host.
+      - webhook_events:/app/logs/runs
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
 
   webhook-proxy:
     # Digest pinned; same caddy:2.10.0-alpine pin as the reference repo.
-    image: caddy:2.10.0-alpine  # digest sha256:ae4458638da8e1e91aafffb231c5f8778e964bca650c8a8cb23a7e8ac557aa3c (tag→digest verified 2026-09-23; direct digest refs 404 on docker.io)
+    # Digest re-verified against registry-1.docker.io 2026-10-18. (An interim
+    # tag-only line here carried a one-char typo'd digest — …8da8e1e91a… —
+    # which is why digest refs appeared to 404; the real …8da8e1a91a… resolves.)
+    image: caddy:2.10.0-alpine@sha256:ae4458638da8e1a91aafffb231c5f8778e964bca650c8a8cb23a7e8ac557aa3c
     # Cutover posture (owner decision 2026-09-23: keep the funnel
     # endpoint): host-network mode — caddy binds the host's :80 directly
     # and proxies the HOST-RUN dispatch receiver on loopback. No
@@ -63,3 +74,4 @@ services:
 volumes:
   caddy_data:
   caddy_config:
+  webhook_events:

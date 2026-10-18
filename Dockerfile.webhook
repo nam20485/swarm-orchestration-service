@@ -15,6 +15,9 @@ ENV PYTHONUNBUFFERED=1 \
     WEBHOOK_PORT=8080
 
 RUN useradd --uid 1000 --create-home app
+# Trace root for the durable event tail (compose mounts a named volume here);
+# pre-created and app-owned so the empty volume inherits this ownership.
+RUN mkdir -p /app/logs/runs && chown -R app:app /app/logs
 USER app
 
 EXPOSE 8080
