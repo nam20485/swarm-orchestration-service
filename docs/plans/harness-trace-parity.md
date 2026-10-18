@@ -1,6 +1,6 @@
 # Plan: Harness Trace Parity
 
-Status: in progress — S1 landed (`2ad9215` on `dev/harness-trace-parity`, PR #32) and is measured; S2–S6 unstarted
+Status: in progress — S1 landed (`2ad9215`, PR #32) and is measured; S2 landed via the v2 spawn fix (PR #38); S5 idle watchdog landed on `dev/acp-idle-watchdog` (owner decision 2026-10-17: a live session is never killed on elapsed time — kill only on ACP_IDLE_TIMEOUT with no session updates, hard ceiling opt-in via ACP_PROMPT_TIMEOUT); S3 noise filter, S4 golden harness.log rendering, S6 docs unstarted
 Date: 2026-09-25 · Revised: 2026-09-27
 Evidence base: everything below was read or executed live on 2026-09-25/27 against `development` @ `cf5b83d`, the running host service (systemd user unit `webhook-receiver`; PID 1234165 since the 2026-09-27 restart, which loads the working tree — currently this branch), and the frozen old stack at `~/src/github/nam20485/orchestrator-service`. Line references are to those trees as of those dates.
 

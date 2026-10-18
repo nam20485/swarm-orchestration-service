@@ -144,9 +144,10 @@ class FakeProc:
 
 
 class FakeConn:
-    def __init__(self, prompt_delay: float = 0.0) -> None:
+    def __init__(self, prompt_delay: float = 0.0, prompt_exc: Exception | None = None) -> None:
         self.client: object | None = None
         self.prompt_delay = prompt_delay
+        self.prompt_exc = prompt_exc
         self.new_session_kwargs: dict = {}
 
     async def initialize(self, protocol_version: int, **_: object):
@@ -160,6 +161,8 @@ class FakeConn:
     async def prompt(self, *a: object, **k: object):
         if self.prompt_delay:
             await asyncio.sleep(self.prompt_delay)
+        if self.prompt_exc is not None:
+            raise self.prompt_exc
         return SimpleNamespace(stop_reason="end_turn")
 
 
@@ -562,10 +565,11 @@ class TestAcpHostWiring:
         materialized = tmp_path / "materialized"
         materialized.mkdir()
         released: list[str] = []
-        install_spawn(monkeypatch, FakeConn(), FakeProc())
+        install_spawn(monkeypatch, FakeConn(prompt_exc=RuntimeError("boom")), FakeProc())
         host = AcpHost(
-            # Negative prompt timeout forces the session to fail right away.
-            make_settings(tmp_path, acp_prompt_timeout=-1.0),
+            # A prompt failure is the session failure (the old negative
+            # prompt-timeout trick no longer exists: the ceiling is opt-in).
+            make_settings(tmp_path),
             EventStore(),
             bridge=self._bridge_over(materialized, released),
         )

@@ -85,7 +85,8 @@ Every knob is an environment variable parsed in
 | `ACP_WORKSPACE_ROOT` | `/tmp/swarm-acp-workspaces` | root for per-run session workspaces (the repo itself is never used) |
 | `ACP_CLONE_ROOT` | *(empty)* | when set, the session cwd becomes `<root>/<repo name>` — the launcher-minted checkout of the envelope's repo — instead of a scratch dir; a missing checkout fails the envelope; mutually exclusive with `SANDBOX_ENABLED` (the host refuses to start with both) |
 | `ACP_STEP_TIMEOUT` | `30` | seconds per protocol step (initialize, session open) |
-| `ACP_PROMPT_TIMEOUT` | `600` | seconds per prompt (one cold session per envelope) |
+| `ACP_IDLE_TIMEOUT` | `300` | idle watchdog: a run is killed only after this many seconds with **no** session updates — any update resets the clock; a live session is never killed on elapsed time |
+| `ACP_PROMPT_TIMEOUT` | `0` | optional hard ceiling on the whole prompt in seconds; `0` (default) disables it |
 | `ACP_DEFAULT_PERMISSION` | `reject` | action for unclassified permission requests: `reject` (headless-safe) or `allow_once` |
 | `ACP_DENY_PATTERNS` | *(empty)* | comma-separated regexes (case-insensitive) that always reject a permission request; validated at boot |
 | `ACP_DENIED_TOOLS` | *(empty)* | tools denied pre-prompt via the workspace `opencode.json` permission config (bare workspaces only — never written into an `ACP_CLONE_ROOT` checkout) |

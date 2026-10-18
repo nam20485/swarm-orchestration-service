@@ -84,7 +84,12 @@ class Settings:
     # checkout — seeded config or not — never gets a deny file.
     acp_clone_root: str = ""
     acp_step_timeout: float = 30.0  # per protocol step (initialize, new_session)
-    acp_prompt_timeout: float = 600.0  # per prompt (one cold session per envelope)
+    # Optional hard ceiling on the whole prompt; 0 = disabled (owner
+    # decision 2026-10-17: a live session is never killed on elapsed time).
+    acp_prompt_timeout: float = 0.0
+    # Idle watchdog: kill a run after this long with NO session updates —
+    # any update resets the clock (protocol events are the heartbeat).
+    acp_idle_timeout: float = 300.0
     # Unclassified permission requests: "reject" (default, headless-safe) or
     # "allow_once". Read-only tool kinds are always allowed; the deny patterns
     # below always reject.
@@ -189,6 +194,10 @@ class Settings:
         if trace_keep_runs < 1:
             raise ValueError("ACP_TRACE_KEEP_RUNS must be at least 1.")
 
+        idle_timeout = float(os.environ.get("ACP_IDLE_TIMEOUT", "300"))
+        if idle_timeout <= 0:
+            raise ValueError("ACP_IDLE_TIMEOUT must be a positive number.")
+
         return cls(
             host=os.environ.get("WEBHOOK_HOST", "0.0.0.0"),
             port=int(os.environ.get("WEBHOOK_PORT", "8080")),
@@ -205,7 +214,8 @@ class Settings:
             acp_workspace_root=os.environ.get("ACP_WORKSPACE_ROOT", "").strip(),
             acp_clone_root=acp_clone_root,
             acp_step_timeout=float(os.environ.get("ACP_STEP_TIMEOUT", "30")),
-            acp_prompt_timeout=float(os.environ.get("ACP_PROMPT_TIMEOUT", "600")),
+            acp_prompt_timeout=float(os.environ.get("ACP_PROMPT_TIMEOUT", "0")),
+            acp_idle_timeout=idle_timeout,
             acp_default_permission=default_permission,
             acp_deny_patterns=deny_patterns,
             acp_denied_tools=_env_list("ACP_DENIED_TOOLS"),
