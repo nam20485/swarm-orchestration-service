@@ -68,7 +68,13 @@ $loaded = @(@(Read-Jsonl (Join-Path $MetricsDir 'instructions-loaded.jsonl')) |
 $reads = @(@(Read-Jsonl (Join-Path $MetricsDir 'rule-reads.jsonl')) |
   Where-Object { $_.PSObject.Properties['cwd'] -and $_.cwd -eq $repoPath })
 
-function In-Window { param($items) @(@($items) | Where-Object { $_.PSObject.Properties['ts'] -and ([datetime]$_.ts).ToUniversalTime() -ge $cutoff }) }
+# Null-safe window filter: `-as` yields $null for a null, absent, or
+# non-date ts — the row simply misses the window instead of throwing
+# (a bare [datetime] cast aborts the whole report under ErrorActionPreference
+# Stop, exactly what these guards exist to prevent).
+function In-Window { param($items) @(@($items) | Where-Object {
+    $ts = if ($_.PSObject.Properties['ts']) { $_.ts -as [datetime] }
+    $null -ne $ts -and $ts.ToUniversalTime() -ge $cutoff }) }
 # An @() returned from a function collapses to $null on assignment, so re-wrap here: under
 # Set-StrictMode a bare $null.Count is an error, not 0.
 $loadedW = @(In-Window $loaded)
@@ -98,7 +104,7 @@ $rows = @()
 if (Test-Path -LiteralPath $ruleRoot) {
   $rows = @(Get-ChildItem -LiteralPath $ruleRoot -Recurse -Filter '*.md' -Force | ForEach-Object {
       $rel = $_.FullName.Substring($ruleRoot.Length + 1) -replace '\\', '/'
-      $hits = @($readsW | Where-Object { $_.PSObject.Properties['file'] -and $_.file.Replace('\', '/').EndsWith("/.agents/rules/$rel") })
+      $hits = @($readsW | Where-Object { $_.PSObject.Properties['file'] -and $_.file -and $_.file.Replace('\', '/').EndsWith("/.agents/rules/$rel") })
       $canary = ''
       if ($registryObj -and $registryObj.PSObject.Properties['rules']) {
         $val = $registryObj.rules.PSObject.Properties[$rel]
@@ -173,7 +179,7 @@ if ($AuditFabrication) {
             $relOfToken = $fileOfToken -replace '^!DECOY! ', ''
             $hasRead = @($reads | Where-Object {
                 $_.PSObject.Properties['session'] -and $_.session -eq $session -and
-                $_.PSObject.Properties['file'] -and $_.file.Replace('\', '/').EndsWith("/.agents/rules/$relOfToken")
+                $_.PSObject.Properties['file'] -and $_.file -and $_.file.Replace('\', '/').EndsWith("/.agents/rules/$relOfToken")
               }).Count -gt 0
             $kind = if ($fileOfToken -like '!DECOY!*') { 'DECOY-APPEARED (over-load or fabrication)' }
             elseif (-not $hasRead) { 'UNSUPPORTED (token with no logged read)' }
