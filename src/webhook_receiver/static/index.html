@@ -339,9 +339,13 @@ $("live-latest").addEventListener("click", () => {
   window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" });
 });
 $("live-export").addEventListener("click", () => {
-  // oldest-first, one event per line — same shape as events.jsonl
+  // oldest-first, one event per line — same shape as events.jsonl; a
+  // coalesced row also carries count + merged so the accumulated chunk
+  // text exports too (data stays the first fragment's payload — the
+  // run_id context is constant across a coalesced stream)
   const lines = liveItems.slice().reverse()
-    .map((i) => JSON.stringify({ id: i.id, ts: i.ts, type: i.type, data: i.data }));
+    .map((i) => JSON.stringify({ id: i.id, ts: i.ts, type: i.type, data: i.data,
+                                 ...(i.merged !== undefined ? { count: i.count, merged: i.merged } : {}) }));
   download(`live-${stamp()}.jsonl`, lines.join("\n") + (lines.length ? "\n" : ""));
 });
 
