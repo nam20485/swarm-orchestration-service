@@ -1,6 +1,11 @@
-# Kilo agent state — keep only the agent definitions and skills; worktrees and runtime state stay local
+# Kilo agent state — keep only the agent definitions, project commands, and
+# skills; worktrees and runtime state stay local. `.kilo/agent/` (singular) is
+# where Kilo writes generated agent defs and is read alongside `.kilo/agents/`;
+# `.kilo/commands/` holds project slash-command/workflow .md files.
 .kilo/*
 !.kilo/agents/
+!.kilo/agent/
+!.kilo/commands/
 !.kilo/skills/
 
 # gh-issue-tracking-init forensic run logs (one timestamped file per run)
