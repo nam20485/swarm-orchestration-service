@@ -5,8 +5,9 @@
   table of contents pointed at, and did any canary token appear without a read behind it?
 
 .DESCRIPTION
-  Qwen Code never auto-loads `.agents/` (zero references in the installed bundle), so the
-  `## Memory and Rules` TOC in AGENTS.md is progressive disclosure by convention only: the
+  Qwen Code never loads `.agents/rules/` as context (`.agents/skills/` IS a scanned
+  skills root — see .agents/rules/qwen-code-docs.md), so the `## Memory and Rules`
+  TOC in AGENTS.md is progressive disclosure by convention only: the
   outline is in context, the rule bodies are not. Two user-scope hooks write ground truth to
   ~/.qwen/metrics/:
     instructions-loaded.jsonl  <- InstructionsLoaded  (context files actually injected)
@@ -59,12 +60,15 @@ function Read-Jsonl {
     ForEach-Object { try { $_ | ConvertFrom-Json } catch { } }
 }
 
+# StrictMode-safe property guards: one malformed row in the append-only hook
+# logs must be skipped, not fatal to the whole report (PropertyNotFoundException
+# under Set-StrictMode -Version Latest + $ErrorActionPreference Stop).
 $loaded = @(@(Read-Jsonl (Join-Path $MetricsDir 'instructions-loaded.jsonl')) |
-  Where-Object { $_.cwd -eq $repoPath })
+  Where-Object { $_.PSObject.Properties['cwd'] -and $_.cwd -eq $repoPath })
 $reads = @(@(Read-Jsonl (Join-Path $MetricsDir 'rule-reads.jsonl')) |
-  Where-Object { $_.cwd -eq $repoPath })
+  Where-Object { $_.PSObject.Properties['cwd'] -and $_.cwd -eq $repoPath })
 
-function In-Window { param($items) @(@($items) | Where-Object { ([datetime]$_.ts).ToUniversalTime() -ge $cutoff }) }
+function In-Window { param($items) @(@($items) | Where-Object { $_.PSObject.Properties['ts'] -and ([datetime]$_.ts).ToUniversalTime() -ge $cutoff }) }
 # An @() returned from a function collapses to $null on assignment, so re-wrap here: under
 # Set-StrictMode a bare $null.Count is an error, not 0.
 $loadedW = @(In-Window $loaded)
@@ -94,9 +98,9 @@ $rows = @()
 if (Test-Path -LiteralPath $ruleRoot) {
   $rows = @(Get-ChildItem -LiteralPath $ruleRoot -Recurse -Filter '*.md' -Force | ForEach-Object {
       $rel = $_.FullName.Substring($ruleRoot.Length + 1) -replace '\\', '/'
-      $hits = @($readsW | Where-Object { $_.file -and $_.file.Replace('\', '/').EndsWith("/.agents/rules/$rel") })
+      $hits = @($readsW | Where-Object { $_.PSObject.Properties['file'] -and $_.file.Replace('\', '/').EndsWith("/.agents/rules/$rel") })
       $canary = ''
-      if ($registryObj) {
+      if ($registryObj -and $registryObj.PSObject.Properties['rules']) {
         $val = $registryObj.rules.PSObject.Properties[$rel]
         if ($val) { $canary = $val.Value }
       }
@@ -131,7 +135,8 @@ if ($consulted.Count + $neverRead.Count -gt 0) {
   }
 }
 
-$contam = @(Read-Jsonl (Join-Path $MetricsDir 'registry-contamination.jsonl'))
+$contam = @(@(Read-Jsonl (Join-Path $MetricsDir 'registry-contamination.jsonl')) |
+  Where-Object { $_.PSObject.Properties['cwd'] -and $_.cwd -eq $repoPath -and $_.PSObject.Properties['session'] -and $_.PSObject.Properties['ts'] -and $_.PSObject.Properties['file'] })
 if ($contam.Count) {
   Write-Host "`n!! REGISTRY CONTAMINATION: the answer key was read in $(@($contam | ForEach-Object session | Sort-Object -Unique).Count) session(s); canary recitals from those sessions prove nothing:" -ForegroundColor Yellow
   $contam | ForEach-Object { Write-Host "   $($_.ts)  session=$($_.session)  $($_.file)" }
@@ -146,8 +151,10 @@ if ($AuditFabrication) {
   }
   else {
     $tokens = @{}
-    if ($registryObj) {
+    if ($registryObj -and $registryObj.PSObject.Properties['rules']) {
       $registryObj.rules.PSObject.Properties | ForEach-Object { $tokens[$_.Value] = $_.Name }
+    }
+    if ($registryObj -and $registryObj.PSObject.Properties['negative_controls']) {
       $registryObj.negative_controls.PSObject.Properties |
         Where-Object { $_.Name -ne '_purpose' } |
         ForEach-Object { $tokens[$_.Value] = "!DECOY! $($_.Name)" }
@@ -161,7 +168,13 @@ if ($AuditFabrication) {
         foreach ($k in $tokens.Keys) {
           if ($text -match [regex]::Escape($k)) {
             $fileOfToken = $tokens[$k]
-            $hasRead = @($reads | Where-Object { $_.session -eq $session -and $_.file -like "*$($fileOfToken -replace '^.*/','')" }).Count -gt 0
+            # Anchor the read credit the same way the consult table does: a
+            # basename-only match would credit a read of any same-named file.
+            $relOfToken = $fileOfToken -replace '^!DECOY! ', ''
+            $hasRead = @($reads | Where-Object {
+                $_.PSObject.Properties['session'] -and $_.session -eq $session -and
+                $_.PSObject.Properties['file'] -and $_.file.Replace('\', '/').EndsWith("/.agents/rules/$relOfToken")
+              }).Count -gt 0
             $kind = if ($fileOfToken -like '!DECOY!*') { 'DECOY-APPEARED (over-load or fabrication)' }
             elseif (-not $hasRead) { 'UNSUPPORTED (token with no logged read)' }
             else { 'supported' }
@@ -169,7 +182,8 @@ if ($AuditFabrication) {
           }
         }
       }
-    if (-not $findings.Count) { Write-Host '   clean: no canary token appeared in any scanned transcript without a read behind it' }
+    if ($tokens.Count -eq 0) { Write-Host '   no canary tokens loaded (registry missing or empty) — transcript scan not run' -ForegroundColor Yellow }
+    elseif (-not $findings.Count) { Write-Host '   clean: no canary token appeared in any scanned transcript without a read behind it' }
     else { $findings | Where-Object { $_.Verdict -ne 'supported' } | Format-Table -AutoSize }
   }
 }
