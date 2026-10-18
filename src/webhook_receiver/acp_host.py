@@ -162,7 +162,11 @@ def _resolve_prompt_race(
         raise watchdog_exc
     if prompt_exc is not None:
         raise prompt_exc
-    raise AcpHostError("idle watchdog exited without a verdict")
+    # Reachable in practice only when the prompt ended cancelled with the
+    # watchdog still pending — name that event, not the watchdog.
+    raise AcpHostError(
+        "prompt ended cancelled with no verdict (idle watchdog still pending)"
+    )
 
 
 def resolve_opencode_bin(settings: Settings) -> str:

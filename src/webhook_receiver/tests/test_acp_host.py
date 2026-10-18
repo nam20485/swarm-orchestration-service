@@ -883,13 +883,13 @@ class TestRunFailures:
         install_spawn(monkeypatch, conn, FakeProc(), [])
 
         with pytest.raises(
-            AcpHostError, match="idle watchdog exited without a verdict"
+            AcpHostError, match="prompt ended cancelled with no verdict"
         ):
             asyncio.run(AcpHost(cfg, store).run(make_info()))
 
         finished = events_of_type(store, "agent_finished")[0]["data"]
         assert finished["ok"] is False
-        assert "without a verdict" in finished["error"]
+        assert "no verdict" in finished["error"]
 
     def test_spawn_failure_raises_acp_host_error(self, tmp_path, monkeypatch) -> None:
         store = EventStore()
@@ -1007,7 +1007,7 @@ class TestResolvePromptRace:
             prompt_task.cancel()
             await asyncio.gather(prompt_task, return_exceptions=True)
             with pytest.raises(
-                AcpHostError, match="idle watchdog exited without a verdict"
+                AcpHostError, match="prompt ended cancelled with no verdict"
             ):
                 _resolve_prompt_race(prompt_task, watchdog_task)
             watchdog_task.cancel()
