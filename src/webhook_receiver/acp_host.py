@@ -7,8 +7,9 @@ the cwd is set on the process and again on ``session/new``), initializes,
 opens a session, sends one prompt, streams the
 ``session/update`` notifications into the :class:`EventStore`, and collects
 the stop reason. No ``opencode serve`` container exists anywhere; the
-process is killed on every exit path (timeout ladder + context-manager
-kill, per ``spikes/acp/host_spike.py``). One client only (opencode) — this
+process is killed on every exit path (idle watchdog + optional hard
+ceiling + context-manager kill, per ``spikes/acp/host_spike.py``). One
+client only (opencode) — this
 is deliberately not a plugin system (Simplicity First).
 
 **Model/agent config is never pinned host-side** (plan §5 Decision 10):
@@ -75,6 +76,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -103,6 +105,15 @@ _KILL_GRACE_SECONDS = 5.0
 
 class AcpHostError(RuntimeError):
     """The ACP session failed to launch, timed out, or broke protocol."""
+
+
+class SessionWatchdogTimeout(TimeoutError):
+    """The idle watchdog (or the optional hard ceiling) ended the session.
+
+    Owner decision 2026-10-17: a live session is never killed on elapsed
+    time — only inactivity (no ``session/update`` for ``ACP_IDLE_TIMEOUT``)
+    ends a run, unless an operator opts into a hard ceiling.
+    """
 
 
 @dataclass(frozen=True)
@@ -182,6 +193,9 @@ class HostClient:
         self._settings = settings
         self._store = store
         self._run_id = run_id
+        # Idle-watchdog heartbeat (owner decision 2026-10-17): every
+        # session_update resets it; only inactivity may end a live run.
+        self.last_activity = time.monotonic()
 
     async def session_update(self, session_id: str, update: Any, **_: Any) -> None:
         """ALL-traces mapping (webui plan W0): every ``session/update`` kind
@@ -189,6 +203,7 @@ class HostClient:
         Unrecognized kinds pass through as ``agent_update`` so future protocol
         additions are visible instead of silently dropped.
         """
+        self.last_activity = time.monotonic()
         kind = getattr(update, "session_update", type(update).__name__)
         emit = self._store.emit
         run_id = self._run_id
@@ -353,6 +368,7 @@ class AcpHost:
         client = HostClient(self._settings, self._store, run_id=info.id)
         step = self._settings.acp_step_timeout
         prompt_timeout = self._settings.acp_prompt_timeout
+        idle_timeout = self._settings.acp_idle_timeout
         trace_enabled = self._settings.acp_trace_enabled
         trace: RunTrace | None = (
             open_run_trace(
@@ -401,8 +417,15 @@ class AcpHost:
                     "--log-level",
                     self._settings.acp_harness_log_level.lower(),
                 ]
-            async with asyncio.timeout(step * 3 + prompt_timeout):
-                async with spawn_agent_process(
+            # A live session is never killed on a stopwatch (owner decision
+            # 2026-10-17): the prompt runs under an idle watchdog — killed
+            # only after ACP_IDLE_TIMEOUT with no session updates, protocol
+            # events as the heartbeat (the old orchestrator-service
+            # watchdog's idle model, ported off the server-log mtime onto
+            # Decision 7's event channel) — with ACP_PROMPT_TIMEOUT as an
+            # optional hard ceiling, disabled by default. Handshake steps
+            # keep their per-step limits below.
+            async with spawn_agent_process(
                     client,
                     bin_path,
                     *agent_args,
@@ -416,44 +439,66 @@ class AcpHost:
                         for k, v in os.environ.items()
                         if k != "OS_WEBHOOK_SECRET"
                     },
-                    cwd=str(workspace),
-                ) as (conn, proc):
-                    drainer = asyncio.create_task(drain_stderr())
-                    init = await asyncio.wait_for(
-                        conn.initialize(
-                            PROTOCOL_VERSION,
-                            client_capabilities=ClientCapabilities(),
-                            client_info=Implementation(
-                                name="swarm-orchestration-host", version="0.2.0"
-                            ),
+                cwd=str(workspace),
+            ) as (conn, proc):
+                drainer = asyncio.create_task(drain_stderr())
+                init = await asyncio.wait_for(
+                    conn.initialize(
+                        PROTOCOL_VERSION,
+                        client_capabilities=ClientCapabilities(),
+                        client_info=Implementation(
+                            name="swarm-orchestration-host", version="0.2.0"
                         ),
-                        step,
+                    ),
+                    step,
+                )
+                session = await asyncio.wait_for(
+                    conn.new_session(cwd=str(workspace)), step
+                )
+                session_id = session.session_id
+                self._store.emit(
+                    "agent_session_started",
+                    run_id=info.id,
+                    session_id=session_id,
+                    protocol_version=init.protocol_version,
+                )
+                prompt_task = asyncio.ensure_future(
+                    conn.prompt(
+                        session_id,
+                        [TextContentBlock(type="text", text=build_prompt(info))],
                     )
-                    session = await asyncio.wait_for(
-                        conn.new_session(cwd=str(workspace)), step
+                )
+                watchdog_task = asyncio.ensure_future(
+                    self._idle_watchdog(client, idle_timeout, prompt_timeout)
+                )
+                try:
+                    await asyncio.wait(
+                        {prompt_task, watchdog_task},
+                        return_when=asyncio.FIRST_COMPLETED,
                     )
-                    session_id = session.session_id
-                    self._store.emit(
-                        "agent_session_started",
-                        run_id=info.id,
-                        session_id=session_id,
-                        protocol_version=init.protocol_version,
-                    )
-                    response = await asyncio.wait_for(
-                        conn.prompt(
-                            session_id,
-                            [TextContentBlock(type="text", text=build_prompt(info))],
-                        ),
-                        prompt_timeout,
-                    )
+                    if prompt_task.done() and not prompt_task.cancelled():
+                        exc = prompt_task.exception()
+                        if exc is not None:
+                            raise exc
+                        response = prompt_task.result()
+                    else:
+                        wexc = watchdog_task.exception()
+                        raise wexc if wexc is not None else AcpHostError(
+                            "idle watchdog exited without a verdict"
+                        )
+                finally:
+                    for task in (prompt_task, watchdog_task):
+                        if not task.done():
+                            task.cancel()
         except asyncio.CancelledError:
             raise  # shutdown: cleanup below, no run-level event
         except Exception as exc:
-            error = (
-                f"acp run timed out after {step * 3 + prompt_timeout:.0f}s"
-                if isinstance(exc, TimeoutError)
-                else f"{type(exc).__name__}: {exc}"
-            )
+            if isinstance(exc, TimeoutError):
+                # Watchdog/ceiling timeouts carry their own precise message;
+                # a bare TimeoutError is a handshake step hitting its limit.
+                error = str(exc) or f"acp handshake step timed out (limit {step:.0f}s)"
+            else:
+                error = f"{type(exc).__name__}: {exc}"
             self._store.emit(
                 "agent_finished",
                 run_id=info.id,
@@ -514,6 +559,38 @@ class AcpHost:
             stop_reason=stop_reason or "",
             workspace=str(workspace),
         )
+
+    async def _idle_watchdog(
+        self, client: HostClient, idle_timeout: float, ceiling: float
+    ) -> None:
+        """End the run only when it goes silent.
+
+        Raises :class:`SessionWatchdogTimeout` after ``idle_timeout`` with no
+        session updates — any update resets the clock, so a live session is
+        never killed on total elapsed time — or at the optional ``ceiling``
+        (``ACP_PROMPT_TIMEOUT``; 0 = disabled). The old orchestrator-service
+        watchdog polled a server-log mtime; the heartbeat here is the
+        protocol event stream (Decision 7's channel).
+        """
+        started = time.monotonic()
+        # Poll finely enough that either limit fires on time: bounded by the
+        # idle limit, the ceiling (when set), and 5s (the old watchdog's
+        # WATCHDOG_POLL_SECS ceiling) — never coarser than the nearest kill.
+        poll = min(idle_timeout, ceiling if ceiling > 0 else idle_timeout, 5.0)
+        while True:
+            await asyncio.sleep(poll)
+            silent_for = time.monotonic() - client.last_activity
+            if silent_for >= idle_timeout:
+                raise SessionWatchdogTimeout(
+                    f"idle watchdog killed the run after {silent_for:.0f}s with "
+                    f"no session updates (limit {idle_timeout:.0f}s, "
+                    "ACP_IDLE_TIMEOUT)"
+                )
+            if ceiling > 0 and time.monotonic() - started >= ceiling:
+                raise SessionWatchdogTimeout(
+                    f"acp run timed out after {ceiling:.0f}s "
+                    "(hard ceiling, ACP_PROMPT_TIMEOUT)"
+                )
 
     async def _prepare_workspace(self, info: PromptInfo) -> Path:
         """Session cwd for the agent; a scratch dir is never the service's

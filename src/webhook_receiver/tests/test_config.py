@@ -55,7 +55,10 @@ class TestFromEnv:
         assert cfg.acp_workspace_root == ""
         assert cfg.acp_clone_root == ""
         assert cfg.acp_step_timeout == 30.0
-        assert cfg.acp_prompt_timeout == 600.0
+        # Session supervision (owner decision 2026-10-17): idle watchdog
+        # governs; the hard ceiling is opt-in (0 = disabled).
+        assert cfg.acp_idle_timeout == 300.0
+        assert cfg.acp_prompt_timeout == 0.0
         assert cfg.acp_default_permission == "reject"
         assert cfg.acp_deny_patterns == ()
         assert cfg.acp_denied_tools == ()

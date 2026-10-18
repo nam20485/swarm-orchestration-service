@@ -148,11 +148,15 @@ class FakeConn:
         stop_reason: str = "end_turn",
         prompt_exc: Exception | None = None,
         delay: float = 0.0,
+        update_interval: float | None = None,
     ) -> None:
         self.client: object | None = None
         self.stop_reason = stop_reason
         self.prompt_exc = prompt_exc
         self.delay = delay
+        # When set, emit a session_update heartbeat every interval while the
+        # delay elapses (idle-watchdog tests: a live-but-slow session).
+        self.update_interval = update_interval
         self.calls: list[tuple] = []
         self.prompt_texts: list[str] = []
 
@@ -171,7 +175,22 @@ class FakeConn:
         self.calls.append(("prompt", session_id))
         self.prompt_texts = [b.text for b in prompt]
         if self.delay:
-            await asyncio.sleep(self.delay)
+            if self.update_interval:
+                # heartbeat while working: resets the idle watchdog's clock
+                elapsed = 0.0
+                while elapsed < self.delay:
+                    await asyncio.sleep(self.update_interval)
+                    elapsed += self.update_interval
+                    if self.client is not None:
+                        await self.client.session_update(
+                            session_id,
+                            AgentMessageChunk(
+                                session_update="agent_message_chunk",
+                                content=TextContentBlock(type="text", text="tick"),
+                            ),
+                        )
+            else:
+                await asyncio.sleep(self.delay)
         if self.prompt_exc is not None:
             raise self.prompt_exc
         # Real SDK: session/update notifications drain before prompt returns.
@@ -724,6 +743,54 @@ class TestRunFailures:
         assert events_of_type(store, "agent_finished")[0]["data"]["ok"] is False
         # Orphan hygiene: the stuck process was killed despite the fake
         # context manager's clean-exit simulation.
+        assert proc.killed is True
+
+    def test_idle_watchdog_kills_silent_run(self, tmp_path, monkeypatch) -> None:
+        # A run that goes silent (no session updates) dies on the idle
+        # limit with a precise reason — even with the hard ceiling off.
+        store = EventStore()
+        cfg = make_settings(tmp_path, acp_idle_timeout=0.1, acp_prompt_timeout=0.0)
+        conn = FakeConn(delay=5.0)  # silent hang: delay, no heartbeats
+        proc = FakeProc()
+        install_spawn(monkeypatch, conn, proc, [])
+
+        with pytest.raises(AcpHostError, match="idle watchdog"):
+            asyncio.run(AcpHost(cfg, store).run(make_info()))
+
+        finished = events_of_type(store, "agent_finished")[0]["data"]
+        assert finished["ok"] is False
+        assert "no session updates" in finished["error"]
+        assert proc.killed is True
+
+    def test_idle_watchdog_spares_live_run(self, tmp_path, monkeypatch) -> None:
+        # Owner decision 2026-10-17: a live session is never killed on
+        # elapsed time. Total runtime (0.6s) far exceeds the idle limit
+        # (0.1s), but heartbeats arrive every 0.02s — the run completes.
+        store = EventStore()
+        cfg = make_settings(tmp_path, acp_idle_timeout=0.1, acp_prompt_timeout=0.0)
+        conn = FakeConn(delay=0.6, update_interval=0.02)
+        install_spawn(monkeypatch, conn, FakeProc(), [])
+
+        result = asyncio.run(AcpHost(cfg, store).run(make_info()))
+
+        assert result.session_id == "sess-1"
+        assert result.stop_reason == "end_turn"
+
+    def test_hard_ceiling_binds_when_set(self, tmp_path, monkeypatch) -> None:
+        # The ceiling is opt-in: with it set, even a heartbeating run dies
+        # at the ceiling with the ceiling reason.
+        store = EventStore()
+        cfg = make_settings(tmp_path, acp_idle_timeout=0.1, acp_prompt_timeout=0.3)
+        conn = FakeConn(delay=5.0, update_interval=0.02)  # alive but over
+        proc = FakeProc()
+        install_spawn(monkeypatch, conn, proc, [])
+
+        with pytest.raises(AcpHostError, match="hard ceiling"):
+            asyncio.run(AcpHost(cfg, store).run(make_info()))
+
+        finished = events_of_type(store, "agent_finished")[0]["data"]
+        assert finished["ok"] is False
+        assert "ACP_PROMPT_TIMEOUT" in finished["error"]
         assert proc.killed is True
 
     def test_spawn_failure_raises_acp_host_error(self, tmp_path, monkeypatch) -> None:
