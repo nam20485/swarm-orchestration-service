@@ -45,8 +45,8 @@ pwsh scripts/rules-metrics.ps1 -Repo <path> -ExcludedSession <session-id>
 ```
 
 Report columns: per rule file — canary, reads, distinct sessions, last read, and `consulted` vs
-`NEVER READ`; plus context-load counts, consult breadth, and a transcript scan that flags any token
-appearing without a logged read behind it.
+`NEVER READ`; plus context-load counts and consult breadth; with `-AuditFabrication`, also a
+transcript scan that flags any token appearing without a logged read behind it.
 
 ## Rules for interpreting the numbers
 
@@ -130,9 +130,9 @@ The point of a day of data is to decide whether prose disclosure suffices:
 
 ## Baseline at install (2026-09-27)
 
-Every rule file in both repos got a canary — 20 real rule files here, including
-this one (18 real in `swarm-context`), plus the two decoys per repo: 22 tracked
-`.md` files in total here. Verified state at install: zero token duplicates, zero
+Every rule file in both repos got a canary — 20 real rule files in
+`swarm-orchestration-service` (18 real in `swarm-context`), plus the two decoys per
+repo: 22 tracked `.md` files in total in `swarm-orchestration-service`, 20 here. Verified state at install: zero token duplicates, zero
 tokens present in
 any `AGENTS.md` preview, zero dead TOC links, zero bare name-only bullets, `markdownlint-cli2` clean.
 `scripts/rules-metrics.ps1` reports 0 context loads / 0 reads / all files `NEVER READ` / 2 decoys
