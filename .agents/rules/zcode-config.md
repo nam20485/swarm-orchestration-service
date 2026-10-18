@@ -64,14 +64,17 @@ Documented frontmatter: `name` and `description` (**both required** — a file m
 | other custom models | a simple on/off toggle, or none | per model config |
 
 `off` is **not** a documented level for any of these, so `thoughtLevel: off` on `GLM-5.3-Flash` is
-unsupported — which corroborates `.agents/memory.md:55` ("blocks GLM-5.3-Flash worker spawning
-entirely", observed 2026-09-10) from documentation rather than from one old observation.
+unsupported — which corroborates from documentation the "blocks GLM-5.3-Flash worker spawning
+entirely" failure (observed 2026-09-10) recorded in the `.agents/memory.md` Remember-To-Do entry
+(`thoughtLevel: off` + GLM-5.3-Flash workers).
 
-**That memory note's first remedy is wrong for our goal.** It suggests "drop it from the worker
-defs" — but omitting `thoughtLevel` leaves the model default, which is `max` for GLM-5.3: the most
-reasoning, not the least. The documented ways to reduce worker reasoning are `thoughtLevel: low` on
-GLM-5.3-Flash, or a model whose list includes a no-thinking level (`nothink` on GLM-5.2). `maxTurns`
-(25/50 in the worker defs) is the hard stop against meander and is independent of thinking.
+**That entry's original remedy ("drop it from the worker defs") was wrong for our goal** — omitting
+`thoughtLevel` leaves the model default, which is `max` for GLM-5.3: the most reasoning, not the
+least. The documented ways to reduce worker reasoning are `thoughtLevel: low` on GLM-5.3-Flash, or
+a model whose list includes a no-thinking level (`nothink` on GLM-5.2). `maxTurns` (25/50 in the
+worker defs) is the hard stop against meander and is independent of thinking. **Settled (owner
+decision 2026-10-16):** every worker def pins `low` (PR #40 + parent mirror; probe re-run
+2026-10-17 PASSED — see the memory entry, now marked SETTLED/Closed).
 
 Also documented: third-party models ignore manually added request parameters — "keys like
 `reasoning_effort` added manually to config are silently ignored."
@@ -143,23 +146,23 @@ is itself the signal that it failed before any model call.
 
 ## Open items
 
-- **King's `thoughtLevel: xhigh` is undocumented for its model** — the per-model
-  table covers GLM/GPT/Claude/Kimi/DeepSeek only; `qwen3.8-max` falls under
-  "other custom models" (a simple on/off toggle, or none — the docs' only Qwen
-  mention is the `enable_thinking` provider parameter, 2026-10-14 re-check).
-  Whether `xhigh` does anything on the king is unverified; a real king session's
-  `request.body.thinking` in the model-io telemetry would settle it.
+- **King's `thoughtLevel: xhigh` — settled on the wire; attribution caveat stands (checked
+  2026-10-18 against `~/.zcode/cli/rollout/`).** King-model telemetry
+  (`model-io-sess_subagent_agent_35e20c2f…`, 2026-09-14; `providerId 91b0a8e2-…`,
+  `modelId qwen3.8-max`) carries `request.body.thinking {"type":"enabled"}` with
+  `output_config.effort "xhigh"` — the level is on the wire, not dropped by ZCode. Caveat: those
+  requests predate the def's `thoughtLevel: xhigh` (added 2026-09-27, `1241f28`), so the custom
+  provider's own default equally explains them (the opencode-side mirror of this provider
+  configures `reasoning_effort: "xhigh"` explicitly). Low harm either way — the king gets
+  xhigh-class reasoning regardless; if the attribution ever matters, the discriminator is one
+  throwaway spawn with the def flipped to `high` and a look at the resulting `effort`.
 - **Custom-provider (UUID) def syntax unverified** — `swarm-orchestrator.md` uses
   `91b0a8e2-…/qwen3.8-max`. Cheapest discriminator: a throwaway def on `91b0a8e2-…/qwen3.8-flash`
   (same provider, cheap model) plus a one-line spawn — not a `$swarm` run on the king model.
-- **Worker reasoning level is an owner decision** — `thoughtLevel: off` is unsupported for
-  GLM-5.3-Flash; the documented choices are `low` on GLM-5.3-Flash or `nothink` on GLM-5.2.
 - **`swarm-researcher.md` declares `mcpServers: [web-reader, web-search-prime, zread]`**, and those
   three Z.AI servers were observed failing to connect on 2026-09-27 (harness WARN `server unavailable
   key=web-reader|zread|web-search-prime type=remote status=failed`). Per the docs a disconnected
   declared server fails the invocation immediately, so the researcher is the worker most likely to
   die at spawn. Check ZCode's MCP connection state before the next swarm.
-- `.agents/memory.md:55` needs correcting once the level decision is made (its "drop it" remedy
-  yields `max`).
 
 <!-- canary: ebony-wigeon-8 -->
