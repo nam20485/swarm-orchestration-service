@@ -216,7 +216,9 @@ def create_app(
         root that carry an ``events.jsonl``, newest first, each merged with
         its ``manifest.json`` when present. Listener-local like ``/events``;
         empty when the events log is off or nothing ran yet."""
-        return list_runs(cfg.acp_trace_root)
+        # Offloaded like the sibling reads below: iterdir + per-dir stat +
+        # manifest reads must never stall the loop on a grown trace root.
+        return await asyncio.to_thread(list_runs, cfg.acp_trace_root)
 
     @app.get("/runs/{run_id}/events")
     async def run_events(run_id: str) -> list[dict[str, Any]]:
