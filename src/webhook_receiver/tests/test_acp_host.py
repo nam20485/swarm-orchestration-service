@@ -45,6 +45,8 @@ from webhook_receiver.acp_host import (
     AcpHostError,
     AcpRunResult,
     HostClient,
+    SessionWatchdogTimeout,
+    _resolve_prompt_race,
     build_prompt,
     resolve_opencode_bin,
 )
@@ -119,14 +121,21 @@ class FakeProc:
     ``asyncio.run``.
     """
 
-    def __init__(self, stderr_text: str | None = None) -> None:
+    def __init__(self, stderr_text: str | None = None,
+                 stderr_stream: object | None = None) -> None:
         self.returncode: int | None = None
         self.killed = False
         self._stderr_text = stderr_text
+        self._stderr_stream = stderr_stream
         self.stderr: asyncio.StreamReader | None = None
 
     def materialize_stderr(self) -> None:
-        if self._stderr_text is not None and self.stderr is None:
+        if self.stderr is not None:
+            return
+        if self._stderr_stream is not None:
+            self.stderr = self._stderr_stream  # type: ignore[assignment]
+            return
+        if self._stderr_text is not None:
             reader = asyncio.StreamReader()
             reader.feed_data(self._stderr_text.encode())
             reader.feed_eof()
@@ -140,6 +149,22 @@ class FakeProc:
         return self.returncode or 0
 
 
+class TimedStderr:
+    """StreamReader stand-in for the stderr-drain path: yields one line
+    per ``interval`` (a harness still logging), then EOF — fuel for the
+    idle-watchdog secondary-liveness-signal tests."""
+
+    def __init__(self, text: str, interval: float) -> None:
+        self._lines = text.encode().splitlines(keepends=True)
+        self._interval = interval
+
+    async def readline(self) -> bytes:
+        if not self._lines:
+            return b""
+        await asyncio.sleep(self._interval)
+        return self._lines.pop(0)
+
+
 class FakeConn:
     """Canned ACP connection: initialize/new_session/prompt + updates."""
 
@@ -149,6 +174,7 @@ class FakeConn:
         prompt_exc: Exception | None = None,
         delay: float = 0.0,
         update_interval: float | None = None,
+        init_delay: float = 0.0,
     ) -> None:
         self.client: object | None = None
         self.stop_reason = stop_reason
@@ -157,14 +183,17 @@ class FakeConn:
         # When set, emit a session_update heartbeat every interval while the
         # delay elapses (idle-watchdog tests: a live-but-slow session).
         self.update_interval = update_interval
+        # Handshake latency (initialize): a slow spawn+handshake must not
+        # debit the idle watchdog's budget (PR #50 review).
+        self.init_delay = init_delay
         self.calls: list[tuple] = []
         self.prompt_texts: list[str] = []
 
     async def initialize(self, protocol_version: int, **_: object):
         self.calls.append(("initialize", protocol_version))
-        # Yield once so scheduled tasks (stderr drainer) get a loop turn,
-        # like real I/O would.
-        await asyncio.sleep(0)
+        # Yield so scheduled tasks (stderr drainer) get a loop turn, like
+        # real I/O would.
+        await asyncio.sleep(self.init_delay or 0)
         return SimpleNamespace(protocol_version=protocol_version)
 
     async def new_session(self, cwd: str, **_: object):
@@ -256,6 +285,18 @@ def install_spawn(
             proc.returncode = proc.returncode or 0
 
     monkeypatch.setattr(acp_host_module, "spawn_agent_process", fake_spawn)
+
+
+async def _settle(
+    result: Any = None, exc: BaseException | None = None, delay: float = 0.0
+) -> Any:
+    """Complete — immediately or after ``delay`` — with ``result`` or by
+    raising ``exc``: task fuel for the prompt/watchdog race tests."""
+    if delay:
+        await asyncio.sleep(delay)
+    if exc is not None:
+        raise exc
+    return result
 
 
 def events_of_type(store: EventStore, type_: str) -> list[dict]:
@@ -793,6 +834,63 @@ class TestRunFailures:
         assert "ACP_PROMPT_TIMEOUT" in finished["error"]
         assert proc.killed is True
 
+    def test_idle_budget_starts_at_prompt_not_handshake(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Spawn + initialize + new_session must not debit the idle budget
+        # (PR #50 review): a handshake slower than the idle limit followed
+        # by a heartbeating prompt completes instead of dying on the
+        # watchdog's first poll.
+        store = EventStore()
+        cfg = make_settings(tmp_path, acp_idle_timeout=0.15, acp_prompt_timeout=0.0)
+        conn = FakeConn(delay=0.6, update_interval=0.02, init_delay=0.3)
+        install_spawn(monkeypatch, conn, FakeProc(), [])
+
+        result = asyncio.run(AcpHost(cfg, store).run(make_info()))
+
+        assert result.session_id == "sess-1"
+        assert result.stop_reason == "end_turn"
+
+    def test_harness_stderr_keeps_silent_run_alive(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Secondary liveness signal (PR #50 review): harness stderr lines
+        # reset the idle clock, so a run with NO session updates at all —
+        # but a harness still logging — survives past the idle limit (the
+        # old orchestrator-service watchdog's stderr-growth signal,
+        # ported).
+        store = EventStore()
+        cfg = make_settings(tmp_path, acp_idle_timeout=0.1, acp_prompt_timeout=0.0)
+        conn = FakeConn(delay=0.6)  # silent hang: no update_interval
+        proc = FakeProc(stderr_stream=TimedStderr("model call\n" * 60, 0.02))
+        install_spawn(monkeypatch, conn, proc, [])
+
+        result = asyncio.run(AcpHost(cfg, store).run(make_info()))
+
+        assert result.session_id == "sess-1"
+        assert result.stop_reason == "end_turn"
+
+    def test_prompt_cancelled_fails_with_no_verdict_error(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # The SDK cancelling the prompt coroutine (connection loss) leaves
+        # the watchdog pending: the run fails with the honest no-verdict
+        # error instead of InvalidStateError off the pending task's
+        # unset exception (PR #50 review).
+        store = EventStore()
+        cfg = make_settings(tmp_path, acp_idle_timeout=0.1, acp_prompt_timeout=0.0)
+        conn = FakeConn(prompt_exc=asyncio.CancelledError())
+        install_spawn(monkeypatch, conn, FakeProc(), [])
+
+        with pytest.raises(
+            AcpHostError, match="idle watchdog exited without a verdict"
+        ):
+            asyncio.run(AcpHost(cfg, store).run(make_info()))
+
+        finished = events_of_type(store, "agent_finished")[0]["data"]
+        assert finished["ok"] is False
+        assert "without a verdict" in finished["error"]
+
     def test_spawn_failure_raises_acp_host_error(self, tmp_path, monkeypatch) -> None:
         store = EventStore()
         cfg = make_settings(tmp_path)
@@ -835,6 +933,87 @@ class TestRunFailures:
         finished = events_of_type(store, "agent_finished")[0]["data"]
         assert finished["session_id"] is None
         assert finished["ok"] is False
+
+
+class TestResolvePromptRace:
+    """_resolve_prompt_race (PR #50 review): the both-done prompt/watchdog
+    race resolves to one honest outcome, with both tasks' outcomes read
+    guarded — never InvalidStateError off a pending task."""
+
+    def test_prompt_result_wins_with_watchdog_pending(self) -> None:
+        async def scenario() -> None:
+            outcome = SimpleNamespace(stop_reason="end_turn")
+            prompt_task = asyncio.ensure_future(_settle(outcome))
+            watchdog_task = asyncio.ensure_future(_settle(delay=60))
+            await asyncio.sleep(0)  # prompt settles; watchdog mid-sleep
+            assert _resolve_prompt_race(prompt_task, watchdog_task) is outcome
+            watchdog_task.cancel()
+            await asyncio.gather(watchdog_task, return_exceptions=True)
+
+        asyncio.run(scenario())
+
+    def test_prompt_exception_raises_with_watchdog_pending(self) -> None:
+        async def scenario() -> None:
+            prompt_task = asyncio.ensure_future(_settle(exc=RuntimeError("boom")))
+            watchdog_task = asyncio.ensure_future(_settle(delay=60))
+            await asyncio.sleep(0)
+            with pytest.raises(RuntimeError, match="boom"):
+                _resolve_prompt_race(prompt_task, watchdog_task)
+            watchdog_task.cancel()
+            await asyncio.gather(watchdog_task, return_exceptions=True)
+
+        asyncio.run(scenario())
+
+    def test_watchdog_kill_reason_wins_when_both_done(self) -> None:
+        async def scenario() -> None:
+            # Correlated race: the hung stream errors out right as the
+            # idle deadline expires — the kill reason is the diagnosis,
+            # not the follow-on channel error.
+            prompt_task = asyncio.ensure_future(
+                _settle(exc=RuntimeError("channel broke"))
+            )
+            watchdog_task = asyncio.ensure_future(
+                _settle(exc=SessionWatchdogTimeout("idle watchdog killed the run"))
+            )
+            await asyncio.sleep(0)
+            with pytest.raises(SessionWatchdogTimeout, match="idle watchdog killed"):
+                _resolve_prompt_race(prompt_task, watchdog_task)
+            # The sibling's outcome stays readable after resolution —
+            # run()'s finally retrieves it exactly this way.
+            assert isinstance(prompt_task.exception(), RuntimeError)
+
+        asyncio.run(scenario())
+
+    def test_finished_prompt_beats_same_turn_ceiling(self) -> None:
+        async def scenario() -> None:
+            # Ceiling verdict landing in the same turn the prompt answered:
+            # a run that returned a result succeeded.
+            outcome = SimpleNamespace(stop_reason="end_turn")
+            prompt_task = asyncio.ensure_future(_settle(outcome))
+            watchdog_task = asyncio.ensure_future(
+                _settle(exc=SessionWatchdogTimeout("hard ceiling"))
+            )
+            await asyncio.sleep(0)
+            assert _resolve_prompt_race(prompt_task, watchdog_task) is outcome
+            watchdog_task.exception()  # consume the sibling's verdict
+
+        asyncio.run(scenario())
+
+    def test_cancelled_prompt_pending_watchdog_reports_no_verdict(self) -> None:
+        async def scenario() -> None:
+            prompt_task = asyncio.ensure_future(_settle(delay=60))
+            watchdog_task = asyncio.ensure_future(_settle(delay=60))
+            await asyncio.sleep(0)
+            prompt_task.cancel()
+            await asyncio.gather(prompt_task, return_exceptions=True)
+            with pytest.raises(
+                AcpHostError, match="idle watchdog exited without a verdict"
+            ):
+                _resolve_prompt_race(prompt_task, watchdog_task)
+            watchdog_task.cancel()
+            await asyncio.gather(watchdog_task, return_exceptions=True)
+
+        asyncio.run(scenario())
 
 
 class TestResolveOpencodeBin:

@@ -125,6 +125,46 @@ class AcpRunResult:
     workspace: str
 
 
+def _resolve_prompt_race(
+    prompt_task: asyncio.Task[Any], watchdog_task: asyncio.Task[None]
+) -> Any:
+    """Resolve the prompt/watchdog race into one honest outcome.
+
+    ``asyncio.wait(..., FIRST_COMPLETED)`` can return with both tasks done
+    in the same loop turn — correlated in practice: a hung agent's stream
+    errors out right as the idle deadline expires — so both outcomes are
+    read guarded before one is chosen:
+
+    - a prompt that finished (result or exception) speaks for the run: its
+      result is the run's result, its exception the run's failure — even
+      against a same-turn ceiling verdict, a run that answered, succeeded;
+    - otherwise a watchdog verdict wins over the prompt's follow-on error:
+      the kill reason is the precise diagnosis, not the symptom of the
+      channel the kill tore down;
+    - a prompt that ended cancelled (e.g. the SDK cancelling the prompt
+      coroutine on connection loss) while the watchdog is still pending
+      fails honestly here instead of raising ``InvalidStateError`` off a
+      pending task's not-yet-set exception.
+    """
+    prompt_exc = (
+        prompt_task.exception()
+        if prompt_task.done() and not prompt_task.cancelled()
+        else None
+    )
+    watchdog_exc = (
+        watchdog_task.exception()
+        if watchdog_task.done() and not watchdog_task.cancelled()
+        else None
+    )
+    if prompt_exc is None and prompt_task.done() and not prompt_task.cancelled():
+        return prompt_task.result()
+    if watchdog_exc is not None:
+        raise watchdog_exc
+    if prompt_exc is not None:
+        raise prompt_exc
+    raise AcpHostError("idle watchdog exited without a verdict")
+
+
 def resolve_opencode_bin(settings: Settings) -> str:
     """Resolve the opencode binary: explicit setting, PATH, then default."""
     if settings.acp_opencode_bin:
@@ -194,7 +234,10 @@ class HostClient:
         self._store = store
         self._run_id = run_id
         # Idle-watchdog heartbeat (owner decision 2026-10-17): every
-        # session_update resets it; only inactivity may end a live run.
+        # session_update resets it, as does each harness stderr line (a
+        # silent-but-alive tool call keeps logging); only inactivity may
+        # end a live run. run() re-arms it when the prompt starts so the
+        # handshake never debits the idle budget.
         self.last_activity = time.monotonic()
 
     async def session_update(self, session_id: str, update: Any, **_: Any) -> None:
@@ -402,6 +445,13 @@ class AcpHost:
                 line = await stream.readline()
                 if not line:
                     return
+                # Secondary liveness signal for the idle watchdog (the old
+                # orchestrator-service watchdog watched server-log growth
+                # alongside its mtime heartbeat): session/update fires at
+                # tool lifecycle boundaries, so a long-running tool call is
+                # silent on that channel while the harness keeps logging —
+                # a harness still emitting lines is alive.
+                client.last_activity = time.monotonic()
                 text = redact(line.decode(errors="replace").rstrip())
                 if trace is not None:
                     trace.write(text)
@@ -462,6 +512,11 @@ class AcpHost:
                     session_id=session_id,
                     protocol_version=init.protocol_version,
                 )
+                # The idle budget starts when the prompt starts: spawn +
+                # initialize + new_session must not debit it, or a slow
+                # handshake with ACP_IDLE_TIMEOUT configured near it kills
+                # a fresh, about-to-stream session on the first poll.
+                client.last_activity = time.monotonic()
                 prompt_task = asyncio.ensure_future(
                     conn.prompt(
                         session_id,
@@ -476,20 +531,17 @@ class AcpHost:
                         {prompt_task, watchdog_task},
                         return_when=asyncio.FIRST_COMPLETED,
                     )
-                    if prompt_task.done() and not prompt_task.cancelled():
-                        exc = prompt_task.exception()
-                        if exc is not None:
-                            raise exc
-                        response = prompt_task.result()
-                    else:
-                        wexc = watchdog_task.exception()
-                        raise wexc if wexc is not None else AcpHostError(
-                            "idle watchdog exited without a verdict"
-                        )
+                    response = _resolve_prompt_race(prompt_task, watchdog_task)
                 finally:
+                    # Both-done race: whichever outcome was not raised must
+                    # still be consumed — an exception left sitting on a done
+                    # task logs "Task exception was never retrieved" at GC.
+                    # Pending siblings are cancelled as before.
                     for task in (prompt_task, watchdog_task):
                         if not task.done():
                             task.cancel()
+                        elif not task.cancelled():
+                            task.exception()
         except asyncio.CancelledError:
             raise  # shutdown: cleanup below, no run-level event
         except Exception as exc:
@@ -566,11 +618,17 @@ class AcpHost:
         """End the run only when it goes silent.
 
         Raises :class:`SessionWatchdogTimeout` after ``idle_timeout`` with no
-        session updates — any update resets the clock, so a live session is
-        never killed on total elapsed time — or at the optional ``ceiling``
-        (``ACP_PROMPT_TIMEOUT``; 0 = disabled). The old orchestrator-service
-        watchdog polled a server-log mtime; the heartbeat here is the
-        protocol event stream (Decision 7's channel).
+        liveness signal — any ``session/update`` resets the clock, and so
+        does each harness stderr line (a silent-but-alive tool call keeps
+        logging; the old orchestrator-service watchdog's second signal,
+        ported) — so a live session is never killed on total elapsed time —
+        or at the optional ``ceiling`` (``ACP_PROMPT_TIMEOUT``; 0 =
+        disabled). The old watchdog polled a server-log mtime; the
+        heartbeat here is Decision 7's event channel plus the stderr tap.
+        Residual accepted window: with ``ACP_TRACE_ENABLED=false`` the
+        harness does not log, so a single tool call silent longer than
+        ``idle_timeout`` is the kill — size ``ACP_IDLE_TIMEOUT`` above the
+        longest expected silent tool call.
         """
         started = time.monotonic()
         # Poll finely enough that either limit fires on time: bounded by the

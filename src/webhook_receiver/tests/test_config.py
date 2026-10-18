@@ -31,6 +31,7 @@ class TestFromEnv:
             "ACP_CLONE_ROOT",
             "ACP_STEP_TIMEOUT",
             "ACP_PROMPT_TIMEOUT",
+            "ACP_IDLE_TIMEOUT",
             "ACP_DEFAULT_PERMISSION",
             "ACP_DENY_PATTERNS",
             "ACP_DENIED_TOOLS",
@@ -129,6 +130,7 @@ class TestAcpFromEnv:
         monkeypatch.setenv("ACP_CLONE_ROOT", "~/src/github/nam20485/dynamic_workflows")
         monkeypatch.setenv("ACP_STEP_TIMEOUT", "5.5")
         monkeypatch.setenv("ACP_PROMPT_TIMEOUT", "120")
+        monkeypatch.setenv("ACP_IDLE_TIMEOUT", "900")
         monkeypatch.setenv("ACP_DEFAULT_PERMISSION", "allow_once")
         monkeypatch.setenv("ACP_DENY_PATTERNS", "rm\\s+-rf, git\\s+push\\s+--force")
         monkeypatch.setenv("ACP_DENIED_TOOLS", "bash, write")
@@ -142,6 +144,7 @@ class TestAcpFromEnv:
         assert cfg.acp_clone_root == "~/src/github/nam20485/dynamic_workflows"
         assert cfg.acp_step_timeout == 5.5
         assert cfg.acp_prompt_timeout == 120.0
+        assert cfg.acp_idle_timeout == 900.0
         assert cfg.acp_default_permission == "allow_once"
         assert cfg.acp_deny_patterns == ("rm\\s+-rf", "git\\s+push\\s+--force")
         assert cfg.acp_denied_tools == ("bash", "write")
@@ -156,6 +159,24 @@ class TestAcpFromEnv:
         monkeypatch.setenv("OS_WEBHOOK_SECRET", self.SECRET)
         monkeypatch.setenv("ACP_TRACE_KEEP_RUNS", "0")
         with pytest.raises(ValueError, match="ACP_TRACE_KEEP_RUNS must be at least 1"):
+            Settings.from_env()
+
+    def test_idle_timeout_override_and_validation(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Mirrors the keepalive/maxlen pair: the override binds, and a
+        # non-positive value refuses to boot (0 would mean the watchdog
+        # kills every run on its first poll).
+        monkeypatch.setenv("OS_WEBHOOK_SECRET", self.SECRET)
+        monkeypatch.setenv("ACP_IDLE_TIMEOUT", "45.5")
+        assert Settings.from_env().acp_idle_timeout == 45.5
+        monkeypatch.setenv("ACP_IDLE_TIMEOUT", "0")
+        with pytest.raises(
+            ValueError, match="ACP_IDLE_TIMEOUT must be a positive number"
+        ):
+            Settings.from_env()
+        monkeypatch.setenv("ACP_IDLE_TIMEOUT", "-1")
+        with pytest.raises(ValueError, match="ACP_IDLE_TIMEOUT"):
             Settings.from_env()
 
     def test_invalid_harness_log_level_raises(
