@@ -47,13 +47,17 @@
   #live th:last-child, #live td:last-child,
   #webhooks th:last-child, #webhooks td:last-child,
   #detail th:last-child, #detail td:last-child { width: 100%; }
-  #runs > table th:nth-child(3), #runs > table td:nth-child(3),
-  #runs > table th:nth-child(4), #runs > table td:nth-child(4) {
-    white-space: normal; word-break: break-word; }
-  #runs > table th:nth-child(3), #runs > table td:nth-child(3) { width: 18%; }
-  #runs > table th:nth-child(4), #runs > table td:nth-child(4) {
-    width: 24%; min-width: 14rem; }
-  #runs > table th:nth-child(2), #runs > table td:nth-child(2) { width: 100%; }
+  /* runs index: fixed layout — under auto layout the break-word columns
+     have a min-content of one character, so over-constrained hints squeeze
+     outcome into a vertical ribbon; fixed layout makes the header widths
+     law (outcome takes the remainder) */
+  #runs > table { table-layout: fixed; }
+  #runs > table th:nth-child(1) { width: 7rem; }
+  #runs > table th:nth-child(2) { width: 20%; }
+  #runs > table th:nth-child(3) { width: 20%; }
+  #runs > table th:nth-child(5) { width: 12.5rem; }
+  #runs > table td:nth-child(2), #runs > table td:nth-child(3),
+  #runs > table td:nth-child(4) { white-space: normal; word-break: break-word; }
   .kind { color: #79c0ff; } .runid { color: #d2a8ff; cursor: pointer; }
   .err { color: #f85149; } .ok { color: #3fb950; } .dim { color: #8b949e; }
   details { margin: 0; } details summary { cursor: pointer; color: #8b949e; }
@@ -79,6 +83,7 @@
     <div class="bar">
       <input type="text" id="live-filter" placeholder="filter by event type or run id…">
       <button id="live-pause">pause</button>
+      <button id="live-latest" hidden>↓ latest</button>
       <span class="dim" id="live-count"></span>
     </div>
     <table><thead><tr>
@@ -113,6 +118,11 @@
 const $ = (id) => document.getElementById(id);
 const MAX_ROWS = 500;
 const COLLAPSED = new Set([
+  "user_message_chunk", "agent_message_chunk", "agent_thought_chunk", "agent_update",
+]);
+// live-feed fragment streams: consecutive same-stream events coalesce into
+// one growing row (terminal-line semantics) instead of one row per fragment
+const COALESCED = new Set([
   "user_message_chunk", "agent_message_chunk", "agent_thought_chunk", "agent_update",
 ]);
 
@@ -157,6 +167,33 @@ const updateLiveCount = () => {
 };
 const atBottom = () =>
   window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 140;
+const syncLatestPill = () => { $("live-latest").hidden = atBottom(); };
+const rowFor = (item) => {
+  const tr = document.createElement("tr");
+  tr._key = item.key ?? `id:${item.id}`;
+  cell(tr, String(item.id), "dim");
+  cell(tr, fmtTime(item.ts), "dim");
+  cell(tr, item.type, "kind");
+  const rid = (item.data || {}).run_id || (item.data || {}).id || "";
+  const runCell = cell(tr, shortId(rid), rid ? "runid" : "dim");
+  if (rid) {
+    runCell.title = rid;
+    runCell.addEventListener("click", () => { openRun(rid); });
+  }
+  const dataCell = document.createElement("td");
+  dataCell.className = "wrap";
+  if (item.merged !== undefined) {
+    const tag = document.createElement("span");
+    tag.className = "dim";
+    tag.textContent = `×${item.count} `;
+    dataCell.appendChild(tag);
+    dataCell.appendChild(document.createTextNode(item.merged));
+  } else {
+    appendData(dataCell, item);
+  }
+  tr.appendChild(dataCell);
+  return tr;
+};
 const renderLive = () => {
   const body = $("live-body");
   const stick = atBottom();
@@ -166,24 +203,9 @@ const renderLive = () => {
   const shown = liveItems.filter(liveMatch).slice(0, MAX_ROWS).reverse();
   $("live-empty").textContent = liveItems.length ? "" : "no events yet";
   updateLiveCount();
-  for (const item of shown) {
-    const tr = document.createElement("tr");
-    cell(tr, String(item.id), "dim");
-    cell(tr, fmtTime(item.ts), "dim");
-    cell(tr, item.type, "kind");
-    const rid = (item.data || {}).run_id || (item.data || {}).id || "";
-    const runCell = cell(tr, shortId(rid), rid ? "runid" : "dim");
-    if (rid) {
-      runCell.title = rid;
-      runCell.addEventListener("click", () => { openRun(rid); });
-    }
-    const dataCell = document.createElement("td");
-    dataCell.className = "wrap";
-    appendData(dataCell, item);
-    tr.appendChild(dataCell);
-    body.appendChild(tr);
-  }
+  for (const item of shown) body.appendChild(rowFor(item));
   if (stick) window.scrollTo({ top: document.documentElement.scrollHeight });
+  syncLatestPill();
 };
 const expandedIds = new Set(); // survives tbody rebuilds mid-stream
 const wireExpansion = (details, key) => {
@@ -246,10 +268,47 @@ const connect = () => {
       const data = JSON.parse(ev.data);
       // The SSE frame carries the data dict only; ts falls back to arrival
       // time (ring-replayed items show "now" — durable views carry true ts).
-      liveItems.unshift({ id: ev.lastEventId, ts: data.ts ?? Date.now() / 1000, type, data });
+      const ts = data.ts ?? Date.now() / 1000;
+      // Coalesce consecutive fragments of one stream into a single growing
+      // row — an active session's chunk events are a firehose otherwise.
+      const key = COALESCED.has(type)
+        ? `${type}|${(data || {}).run_id || (data || {}).id || ""}`
+        : null;
+      const head = liveItems[0];
+      let mergedIntoHead = false;
+      if (key && head && head.key === key) {
+        head.merged = ((head.merged ?? String((head.data || {}).text ?? "")) +
+                       String((data || {}).text ?? "")).slice(-1500);
+        head.count = (head.count ?? 1) + 1;
+        head.ts = ts;
+        head.id = ev.lastEventId;
+        mergedIntoHead = true;
+      } else {
+        liveItems.unshift({ id: ev.lastEventId, ts, type, data, key,
+                            merged: key ? String((data || {}).text ?? "") : undefined,
+                            count: key ? 1 : undefined });
+      }
       liveItems = liveItems.slice(0, 2000);
       updateLiveCount();
-      if (!paused) renderLive();
+      if (paused) return;
+      if ($("live-filter").value.trim()) { renderLive(); return; }
+      // hot path: append/extend one row instead of rebuilding the table —
+      // a full rebuild per event is unreadable churn at fragment rate
+      const body = $("live-body");
+      const stick = atBottom();
+      $("live-empty").textContent = "";
+      if (mergedIntoHead && body.lastElementChild &&
+          body.lastElementChild._key === key) {
+        body.replaceChild(rowFor(head), body.lastElementChild);
+      } else if (!mergedIntoHead) {
+        body.appendChild(rowFor(liveItems[0]));
+        while (body.children.length > MAX_ROWS) body.removeChild(body.firstElementChild);
+      } else {
+        renderLive(); // DOM out of sync with the buffer head
+        return;
+      }
+      if (stick) window.scrollTo({ top: document.documentElement.scrollHeight });
+      syncLatestPill();
     });
   }
 };
@@ -258,6 +317,10 @@ $("live-pause").addEventListener("click", () => {
   paused = !paused;
   $("live-pause").textContent = paused ? "resume" : "pause";
   if (!paused) renderLive();
+});
+window.addEventListener("scroll", syncLatestPill, { passive: true });
+$("live-latest").addEventListener("click", () => {
+  window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" });
 });
 
 // ── runs ────────────────────────────────────────────────────────────────
