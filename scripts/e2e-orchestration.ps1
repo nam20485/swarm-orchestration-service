@@ -68,6 +68,9 @@ $runTag = [guid]::NewGuid().ToString('N').Substring(0, 8)
 $logDir = Join-Path ([System.IO.Path]::GetTempPath()) "e2e-orchestration-$runTag"
 $script:Listener = $null
 $script:EnvBackup = $null
+# StrictMode reads this in the finally even if the venv bootstrap throws
+# before New-RunEnvironment ever assigns it — initialize at script scope.
+$script:TraceRootDir = $null
 
 function Assert-Equal {
     param([string]$Name, $Actual, $Expected)
