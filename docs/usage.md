@@ -31,7 +31,8 @@ optional) or export variables for a host run. The essentials:
 |---|---|---|
 | `OS_WEBHOOK_SECRET` | always | GitHub App webhook secret; the listener refuses to boot without it |
 | `ACP_ENABLED` | dispatch | `false` keeps the no-op consumer (tests, listener-only) |
-| `ACP_PROMPT_TIMEOUT` | long tasks | seconds per prompt (default 600); raise for long agent sessions |
+| `ACP_IDLE_TIMEOUT` | long tasks | idle watchdog: a run is killed only after this many seconds with **no** session updates (default 300); any update resets the clock |
+| `ACP_PROMPT_TIMEOUT` | opt-in | hard ceiling on the whole prompt in seconds; `0` (default) disables it — set it only to bound a run regardless of liveness |
 | `ACP_DENY_PATTERNS` / `ACP_DENIED_TOOLS` | hardening | regex deny-list for permission asks / tools denied pre-prompt |
 | `SANDBOX_ENABLED` / `SANDBOX_API_URL` | sandbox mode | route workspaces through SwarmSandbox provisioning |
 | `DIRECT_BODY_ALLOWED_SENDERS` | direct-body | trusted senders for the verbatim-prompt label; empty = the label never dispatches (fail-closed) |
@@ -130,7 +131,7 @@ SSH tunnel / tailnet serve.
 | `413` / `400` | body over `WEBHOOK_MAX_BODY_BYTES` / malformed JSON (never dispatched) |
 | `202` but only `webhook_filtered` | gate said no: bot sender, non-workflow label, or `direct-body` from a non-allowlisted sender (`reason` field says which) |
 | `webhook_duplicate` | GitHub redelivery inside the dedup window (1024 deliveries) — already processed; nothing to do |
-| `prompt_consumed {ok: false}` | the agent session failed: opencode missing/unauthenticated, prompt timeout (raise `ACP_PROMPT_TIMEOUT`), or a permission policy cancellation — `error` field carries the cause |
+| `prompt_consumed {ok: false}` | the agent session failed: opencode missing/unauthenticated, the idle watchdog fired (raise `ACP_IDLE_TIMEOUT` if a legitimately silent tool call outlives the budget), an opt-in `ACP_PROMPT_TIMEOUT` ceiling bound the run, or a permission policy cancellation — `error` field carries the cause |
 | sandbox mode: envelope fails fast | fail-closed by design when the sandbox API is unreachable — check `SANDBOX_API_URL` and docker; no silent scratch fallback |
 | nothing at all in `/events` | you hit a different instance than the one GitHub delivers to, or the funnel is down (`/health` through the public URL proves the path) |
 
@@ -141,8 +142,9 @@ SSH tunnel / tailnet serve.
   deliveries → Redeliver). Dedup state is also in-process, so a redelivery
   after a restart re-runs.
 - **One cold session per envelope** — a crashed or timed-out session affects
-  nothing else; the queue is FIFO, so long sessions delay later ones (raise
-  `ACP_PROMPT_TIMEOUT` for long tasks rather than letting them die).
+  nothing else; the queue is FIFO, so long sessions delay later ones. Nothing
+  kills a live session on elapsed time: `ACP_IDLE_TIMEOUT` fires only on
+  silence, and `ACP_PROMPT_TIMEOUT` is an opt-in ceiling that defaults to off.
 - **Workspaces** live under `ACP_WORKSPACE_ROOT` (default
   `/tmp/swarm-acp-workspaces/<envelope id>`) unless the sandbox provisions
   them; the repo the listener runs in is never used as a workspace.
