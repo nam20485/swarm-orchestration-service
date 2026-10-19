@@ -72,19 +72,23 @@ from the App's recent-deliveries view: expect HTTP 200 and no events on
 
 ## 5. Trigger a run
 
-Label an issue as a human (bot actors are ignored) with a workflow label:
+Label an issue as a human (bot actors are ignored) with a workflow label.
+The rev2 `gh-issue-tracking:*` clause table is the state machine; each
+clause's label application fires the next webhook:
 
-| Label | Dispatch behavior |
+| Label | Clause behavior |
 |---|---|
-| `orchestration:*` | lifecycle workflows (e.g. `orchestration:plan-approved`); body-named dynamic dispatch within the namespace |
-| `gh-issue-tracking:*` | hierarchy workflows (init, plan/epic/story lifecycle) |
-| `implementation:ready`, `implementation:complete` | implementation path on an already-tracked app |
-| `gh-issue-tracking:direct-body` | the **issue body verbatim** as the agent prompt — only from senders in `DIRECT_BODY_ALLOWED_SENDERS` |
+| `gh-issue-tracking:direct-body` | runs the **issue body verbatim** as the agent prompt (the kickoff dispatch; only from senders in `DIRECT_BODY_ALLOWED_SENDERS`) |
+| `gh-issue-tracking:init-success` | on the Plan issue: scan its epic sub-issues, run `implement-epic` for the first unimplemented one, apply `gh-issue-tracking:epic-implemented` to it |
+| `gh-issue-tracking:epic-implemented` (+ `epic`) | `review-epic-prs` → `report-progress` → `debrief-and-document`, close the epic, then loop: implement the next unimplemented epic (or finish the plan) |
+| deprecated rev1: `orchestration:*`, `implementation:ready`/`complete` | still gate-matched, but intentionally fall to the `(default)` clause: a "no clause matched" comment, then the run ends |
 
 The webhook returns `202` immediately; work happens in the background. The
-agent reads live tracking state (`gh issue list`, `gh pr list`, …), does the
-work on a non-default branch, opens PRs/labels, and finishes. Any other label
-or event type is acknowledged (`202`) and ignored — it never dispatches.
+agent executes the matched clause mechanically — the same steps every time:
+status comments, `/orchestrate-dynamic-workflow` dispatches against the
+agent-instructions repo, and the label applications that advance the cycle.
+Any other label or event type is acknowledged (`202`) and ignored — it never
+dispatches.
 
 ## 6. Observe
 

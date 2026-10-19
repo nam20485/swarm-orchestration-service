@@ -2,16 +2,16 @@
 
 Drives one envelope through the real ``AcpHost`` → ``opencode acp`` path
 against a scratch workspace and prints the EventStore stream plus the final
-outcome. Since Phase 3 the envelope carries the BUILT orchestration prompt
+outcome. The envelope carries the BUILT orchestration prompt
 (``prompt_builder.build_orchestration_prompt``) by default, so the smoke
-shows the real session receiving the open-ended orchestration direction.
+shows the real session receiving the mechanical rev2 clause-table prompt.
 Exit code 0 on ``end_turn``, 1 otherwise.
 
 Usage (from the repo root):
 
     OS_WEBHOOK_SECRET=unused-by-smoke .venv/bin/python -m webhook_receiver.acp_smoke \\
         [--repo owner/repo] [--event issues] [--action labeled]
-        [--label orchestration:plan-approved] [--delivery-id smoke-1]
+        [--label gh-issue-tracking:init-success] [--delivery-id smoke-1]
         [--prompt TEXT]
 
 ACP host knobs come from the environment like the service (``ACP_ENABLED`` is
@@ -46,7 +46,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--repo", default="owner/repo")
     parser.add_argument("--event", default="issues")
     parser.add_argument("--action", default="labeled")
-    parser.add_argument("--label", default="orchestration:plan-approved")
+    parser.add_argument("--label", default="gh-issue-tracking:init-success")
     parser.add_argument("--delivery-id", default="smoke-1")
     parser.add_argument(
         "--prompt",
@@ -75,8 +75,8 @@ def build_envelope(args: argparse.Namespace) -> PromptInfo:
         label=args.label,
         payload={"smoke": True},
     )
-    # Phase 3 default: the envelope carries the built orchestration prompt;
-    # --prompt overrides it (mirrors what the listener now enqueues).
+    # Default: the envelope carries the built clause-table prompt;
+    # --prompt overrides it (mirrors what the listener enqueues).
     return info.model_copy(
         update={"prompt": args.prompt or build_orchestration_prompt(info)}
     )

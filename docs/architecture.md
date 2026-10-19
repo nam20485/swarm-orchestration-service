@@ -17,10 +17,17 @@ replaces the old `orchestrator-service` dispatch. Two properties define it:
   container and attached one-shot clients to it. Here every accepted delivery
   spawns one cold `opencode acp` session that lives exactly as long as the
   work item and is killed afterward.
-- **No prompt-encoded state machine.** The old stack chained workflow steps
-  by applying the *next label* from a 431-line match table. Here the prompt
-  is an open-ended direction: the agent reads live tracking state over `gh`
-  and decides the next step itself.
+- **A mechanical, code-selected state machine.** The old stack chained
+  workflow steps by applying the *next label* from a 431-line match table
+  that the model itself scanned. Phase 3 (2026-09) replaced that with an
+  open-ended direction; owner direction 2026-10-19 restored the match-clause
+  state machine keyed to the rev2 `gh-issue-tracking:*` vocabulary: clause
+  selection is deterministic Python (exact trigger label + co-labels, first
+  match wins), clause bodies are ported from the vendored regression
+  reference `src/webhook_receiver/orchestration_prompt.jinja2.md`, and the
+  label cycle is again the progression mechanism — the same transition
+  every time. Deprecated rev1 `orchestration:*` / `implementation:*` labels
+  fall to the `(default)` clause.
 
 State is deliberately in-process and non-durable — a lost envelope is
 recovered by GitHub's webhook redelivery, not by a local store.
@@ -43,7 +50,7 @@ recovered by GitHub's webhook redelivery, not by a local store.
 | `filters.py` | transport-level dispatch gate (label namespaces, non-bot sender, fail-closed `direct-body` sender allowlist) |
 | `github.py` | HMAC `X-Hub-Signature-256` compute/verify |
 | `prompt_queue.py` | frozen pydantic `PromptInfo` envelope + deduping FIFO consumer |
-| `prompt_builder.py` | open-ended orchestration prompt composed per label class |
+| `prompt_builder.py` | mechanical rev2 clause-table prompt composed per trigger label |
 | `acp_host.py` | one cold `opencode acp` session per envelope; maps protocol traffic to events |
 | `acp_policy.py` | fail-closed permission decisions for the session |
 | `sandbox_bridge.py` | SwarmSandbox provisioning + `docker cp` workspace materialization |
