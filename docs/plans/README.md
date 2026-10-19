@@ -4,6 +4,10 @@ Two states, two places:
 
 - **Top level — still open.** A doc here is awaiting implementation or an owner
   decision. Each carries its own status header:
+  - [`restore-rev2-clause-table.md`](restore-rev2-clause-table.md) — IN
+    PROGRESS (owner-directed 2026-10-19); restores the mechanical rev2
+    `gh-issue-tracking:*` clause-table state machine in `prompt_builder.py`,
+    superseding the simplification plan's §3.3 open-ended prompt.
   - [`old-stack-decommission.md`](old-stack-decommission.md) — PLAN ONLY;
     executes on owner direction once the new listener has the Caddy route and
     has soaked.
