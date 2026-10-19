@@ -144,7 +144,7 @@ class RecordingQueue(PromptQueue):
 
 
 class TestEnqueuedPrompt:
-    """Phase 3: the accepted path fills the envelope's orchestration prompt."""
+    """The accepted path fills the envelope's clause-table orchestration prompt."""
 
     def _client_for(self, store: EventStore) -> tuple[TestClient, RecordingQueue]:
         queue = RecordingQueue(store)
@@ -160,9 +160,11 @@ class TestEnqueuedPrompt:
         assert info.prompt is not None
         assert "owner/repo" in info.prompt
         assert "orchestration:plan" in info.prompt
-        assert "live tracking state" in info.prompt
+        # The rev1 orchestration:* namespace is deprecated: it falls to the
+        # (default) clause, which reports "no clause matched" and ends.
+        assert "no clause matched" in info.prompt
 
-    def test_direct_body_enqueues_body_verbatim(self, store: EventStore, monkeypatch) -> None:
+    def test_direct_body_enqueues_body_inside_clause(self, store: EventStore, monkeypatch) -> None:
         monkeypatch.setenv("DIRECT_BODY_ALLOWED_SENDERS", "nam20485")
         payload = dict(VALID_PAYLOAD, label={"name": "gh-issue-tracking:direct-body"})
         payload["issue"] = dict(
@@ -173,7 +175,10 @@ class TestEnqueuedPrompt:
         client, queue = self._client_for(store)
         resp = post(client, payload, signature=signed(json.dumps(payload).encode()))
         assert resp.status_code == 202
-        assert queue.enqueued[0].prompt == "do the thing"
+        # The body rides verbatim inside the direct-body clause's mechanics.
+        prompt = queue.enqueued[0].prompt
+        assert prompt is not None
+        assert "---BEGIN ISSUE BODY---\ndo the thing\n---END ISSUE BODY---" in prompt
 
     def test_filtered_delivery_enqueues_nothing(self, store: EventStore) -> None:
         client, queue = self._client_for(store)

@@ -16,7 +16,7 @@ class TestParseArgs:
         assert args.repo == "owner/repo"
         assert args.event == "issues"
         assert args.action == "labeled"
-        assert args.label == "orchestration:plan-approved"
+        assert args.label == "gh-issue-tracking:init-success"
         assert args.delivery_id == "smoke-1"
         assert args.prompt is None
 
@@ -31,18 +31,18 @@ class TestParseArgs:
 
 class TestBuildEnvelope:
     def test_envelope_carries_built_orchestration_prompt(self) -> None:
-        # Phase 3: no --prompt means the BUILT orchestration prompt.
+        # No --prompt means the BUILT clause-table prompt.
         args = smoke.parse_args(["--delivery-id", "smoke-9"])
         info = smoke.build_envelope(args)
         assert info.delivery_id == "smoke-9"
         assert info.repo == "owner/repo"
         assert info.event == "issues"
         assert info.action == "labeled"
-        assert info.label == "orchestration:plan-approved"
+        assert info.label == "gh-issue-tracking:init-success"
         assert info.prompt is not None
         assert "owner/repo" in info.prompt
-        assert "orchestration:plan-approved" in info.prompt
-        assert "live tracking state" in info.prompt
+        assert "gh-issue-tracking:init-success" in info.prompt
+        assert "find_next_unimplemented_epic" in info.prompt
 
     def test_envelope_carries_prompt_override(self) -> None:
         args = smoke.parse_args(["--prompt", "custom"])

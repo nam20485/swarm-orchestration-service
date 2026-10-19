@@ -22,9 +22,9 @@ POST /webhooks/github
      |                         direct-body sender allowlist)
   v
 PromptInfo envelope (frozen pydantic, delivery-id dedup window 1024)
-  prompt filled at enqueue by prompt_builder.py (open-ended orchestration
-  direction per label class; the direct-body label runs the issue body
-  verbatim)
+  prompt filled at enqueue by prompt_builder.py (mechanical rev2
+  gh-issue-tracking:* clause table; the direct-body label runs the issue
+  body verbatim inside its clause mechanics)
   v
 PromptQueue consumer (asyncio.Queue, FIFO)              prompt_queue.py
   no host attached (ACP_ENABLED=false) -> mark consumed
@@ -111,7 +111,7 @@ per-subscriber queue).
 | `filters.py` | transport-level dispatch gate (+ `DIRECT_BODY_ALLOWED_SENDERS`) |
 | `github.py` | HMAC `X-Hub-Signature-256` compute/verify |
 | `prompt_queue.py` | frozen `PromptInfo` envelope + deduping FIFO consumer |
-| `prompt_builder.py` | open-ended orchestration prompt per label class |
+| `prompt_builder.py` | mechanical rev2 clause-table prompt (regression reference: `orchestration_prompt.jinja2.md`, vendored beside it) |
 | `acp_host.py` | one cold opencode ACP session per envelope; event mapping |
 | `acp_policy.py` | fail-closed permission decisions |
 | `sandbox_bridge.py` | SwarmSandbox provisioning + docker-cp materialization |

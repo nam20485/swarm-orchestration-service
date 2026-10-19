@@ -1,11 +1,15 @@
-"""Matrix tests for the Phase 3 orchestration prompt builder.
+"""Clause-fidelity matrix tests for the rev2 mechanical clause-table prompt builder.
 
-The label matrix below is the regression checklist from the OLD repo's
-431-line match-clause prompt (``orchestration_prompt.jinja2.md`` pinned at
-orchestrator-service @2bd6d06): every workflow label that clause table
-handled must produce a prompt carrying the equivalent instruction — expressed
-as open-ended direction (decide from live tracking state), never as the old
-next-label chaining."""
+Regression reference: ``src/webhook_receiver/orchestration_prompt.jinja2.md``
+(vendored byte-identical from orchestrator-service @2bd6d06). The Phase 3
+open-ended semantics (class-level directions, no next-label chaining) were
+reversed by owner direction 2026-10-19 ("mechanical and do the same thing
+every time"): these tests assert the OPPOSITE chaining property — each rev2
+trigger selects its ported clause, and clauses DO name the next label they
+apply, because the label cycle is the state machine. Rev1 ``orchestration:*``
+and ``implementation:*`` labels are deprecated and must fall to the
+``(default)`` clause.
+"""
 
 from __future__ import annotations
 
@@ -16,24 +20,30 @@ from webhook_receiver.prompt_queue import PromptInfo
 
 BODY = "Run the deployment drill against staging and report back."
 
-# Every label the old clause table matched on (plus the implementation labels
-# the new dispatch gate admits). The no-chaining property is asserted against
-# this full set.
-OLD_TABLE_LABELS = [
+# The rev2 state-machine alphabet (the gh-issue-tracking-init skill's live
+# label vocabulary) and the deprecated rev1 labels that must land in the
+# default clause.
+REV2_LABELS = [
+    "gh-issue-tracking:direct-body",
+    "gh-issue-tracking:init-success",
+    "gh-issue-tracking:epic-implemented",
+]
+REV1_DEPRECATED_LABELS = [
     "orchestration:plan-approved",
     "orchestration:epic-complete",
     "orchestration:epic-ready",
     "orchestration:epic-implemented",
     "orchestration:epic-reviewed",
     "orchestration:dispatch",
-    "gh-issue-tracking:init-success",
-    "gh-issue-tracking:direct-body",
     "implementation:ready",
     "implementation:complete",
 ]
 
 
-def make_info(label: str, body: str = BODY, **overrides: object) -> PromptInfo:
+def make_info(
+    label: str, body: str = BODY, issue_labels: list[str] | None = None, **overrides: object
+) -> PromptInfo:
+    labels = issue_labels if issue_labels is not None else [label]
     fields: dict[str, object] = {
         "delivery_id": "d-77",
         "repo": "owner/repo",
@@ -46,9 +56,9 @@ def make_info(label: str, body: str = BODY, **overrides: object) -> PromptInfo:
             "label": {"name": label},
             "issue": {
                 "number": 12,
-                "title": "Epic: Phase 1 — Task 1.2 — Data Modeling",
+                "title": "Epic 1: Foundation",
                 "body": body,
-                "labels": [{"name": label}],
+                "labels": [{"name": n} for n in labels],
             },
             "repository": {"full_name": "owner/repo"},
         },
@@ -62,134 +72,202 @@ def norm(text: str) -> str:
     return " ".join(text.split())
 
 
-class TestMatrixOldClauseTable:
-    """One test per old clause-table row: the prompt names the equivalent
-    open-ended direction for that label."""
+def epic_info() -> PromptInfo:
+    """An ``epic-implemented`` delivery on an epic issue (co-label present)."""
+    return make_info(
+        "gh-issue-tracking:epic-implemented",
+        issue_labels=["gh-issue-tracking:epic-implemented", "epic"],
+    )
 
-    def test_plan_approved_directs_epic_creation(self) -> None:
-        p = norm(build_orchestration_prompt(make_info("orchestration:plan-approved")))
-        assert "epic creation" in p
-        assert "next unimplemented" in p
 
-    def test_epic_complete_directs_advancing_the_plan(self) -> None:
-        p = norm(build_orchestration_prompt(make_info("orchestration:epic-complete")))
-        assert "epic creation" in p
-        assert "next unimplemented" in p
+class TestClauseSelection:
+    """Deterministic first-match-wins selection over the rev2 clause table."""
 
-    def test_epic_ready_directs_epic_implementation(self) -> None:
-        p = norm(build_orchestration_prompt(make_info("orchestration:epic-ready")))
-        assert "epic implementation" in p
-
-    def test_epic_implemented_directs_pr_review(self) -> None:
-        p = norm(build_orchestration_prompt(make_info("orchestration:epic-implemented")))
-        assert "pull-request review" in p
-
-    def test_epic_reviewed_directs_report_and_debrief(self) -> None:
-        p = norm(build_orchestration_prompt(make_info("orchestration:epic-reviewed")))
-        assert "report and debrief" in p
-
-    def test_dispatch_directs_workflow_named_in_body(self) -> None:
-        p = norm(build_orchestration_prompt(make_info("orchestration:dispatch")))
-        assert "issue body names a workflow" in p
-        assert "arguments" in p
-
-    def test_init_success_directs_hierarchy_workflow(self) -> None:
+    def test_init_success_selects_the_implement_epic_clause(self) -> None:
         p = norm(build_orchestration_prompt(make_info("gh-issue-tracking:init-success")))
-        assert "issue-tracking hierarchy" in p
-        assert "next unimplemented" in p
+        assert "Matched clause: `gh-issue-tracking:init-success`" in p
+        assert "Scanning for next unimplemented epic" in p
+        assert "$next_epic = find_next_unimplemented_epic()" in p
+        # Canonical implement-epic contract: $epic is the epic ISSUE NUMBER.
+        assert "implement-epic { $epic = $next_epic.number }" in p
+        # The state machine's next hop is named (chaining is the design now).
+        assert 'apply label "gh-issue-tracking:epic-implemented"' in p
 
-    def test_direct_body_prompt_is_the_body_verbatim(self) -> None:
-        info = make_info("gh-issue-tracking:direct-body")
-        assert build_orchestration_prompt(info) == BODY
+    def test_epic_implemented_with_epic_co_label_selects_completion_clause(self) -> None:
+        p = norm(build_orchestration_prompt(epic_info()))
+        assert "Matched clause: `gh-issue-tracking:epic-implemented` + `epic`" in p
+        assert "review-epic-prs { $epic = $epic_number }" in p
+        assert "$workflow_assignment = report-progress, $assignment_inputs = { epic = $epic_number }" in p
+        assert "$workflow_assignment = debrief-and-document, $assignment_inputs = { epic = $epic_number }" in p
+        # Completion marker + loop + terminal state.
+        assert "close this epic issue" in p
+        assert "Loop: pick the next unimplemented epic" in p
+        assert "All epics are complete! The implementation plan is fully implemented." in p
 
-    def test_direct_body_via_issue_labels_not_trigger_label(self) -> None:
+    def test_epic_implemented_without_epic_co_label_falls_to_default(self) -> None:
+        # The old rule: ALL mentioned values in a clause must match.
+        p = norm(
+            build_orchestration_prompt(make_info("gh-issue-tracking:epic-implemented"))
+        )
+        assert "Matched clause: `(default)`" in p
+        assert "no clause matched" in p
+
+    def test_every_rev1_deprecated_label_falls_to_default(self) -> None:
+        for label in REV1_DEPRECATED_LABELS:
+            p = norm(build_orchestration_prompt(make_info(label)))
+            assert "Matched clause: `(default)`" in p, f"{label} did not fall to default"
+            assert "no clause matched" in p
+
+    def test_default_clause_documents_the_rev1_deprecation(self) -> None:
+        p = norm(build_orchestration_prompt(make_info("orchestration:dispatch")))
+        assert "deprecated" in p
+        assert "do not improvise a workflow" in p
+
+    def test_unknown_label_falls_to_default(self) -> None:
+        p = norm(build_orchestration_prompt(make_info("triage:whatever")))
+        assert "Matched clause: `(default)`" in p
+
+
+class TestDirectBodyClause:
+    def test_body_embedded_verbatim_inside_clause_mechanics(self) -> None:
+        p = build_orchestration_prompt(make_info("gh-issue-tracking:direct-body"))
+        assert f"---BEGIN ISSUE BODY---\n{BODY}\n---END ISSUE BODY---" in p
+        n = norm(p)
+        assert "Matched clause: `gh-issue-tracking:direct-body`" in n
+        assert "Running the issue body directly as a prompt" in n
+        # Ported publish & verify + close mechanics from the reference clause.
+        assert "git push -u origin <branch>" in n
+        assert "gh pr create --head <branch>" in n
+        assert "close the issue" in n
+        assert "DIRECT_BODY_ALLOWED_SENDERS" in n
+
+    def test_matches_on_issue_label_set_not_just_trigger(self) -> None:
         # The old direct-body clause matched on the issue's FULL label set:
         # a differently-triggered dispatch on an issue carrying the label
         # still runs the body verbatim (sender gate stays in filters).
-        payload = dict(make_info("orchestration:plan").payload)
-        payload["issue"] = dict(
-            payload["issue"], labels=[{"name": "gh-issue-tracking:direct-body"}]
+        info = make_info(
+            "gh-issue-tracking:init-success",
+            issue_labels=["gh-issue-tracking:direct-body", "gh-issue-tracking:init-success"],
         )
-        info = make_info("orchestration:plan", payload=payload)
-        assert build_orchestration_prompt(info) == BODY
+        p = build_orchestration_prompt(info)
+        assert f"---BEGIN ISSUE BODY---\n{BODY}\n---END ISSUE BODY---" in p
+        # The init-success clause did NOT run despite being the trigger label.
+        assert "Scanning for next unimplemented epic" not in p
 
-    def test_direct_body_empty_body_gets_sentinel_direction(self) -> None:
+    def test_empty_body_gets_sentinel_direction(self) -> None:
         info = make_info("gh-issue-tracking:direct-body", body="")
         p = norm(build_orchestration_prompt(info))
         assert "empty" in p
         assert "owner/repo" in p
         assert "#12" in p
 
-    def test_implementation_ready_directs_item_implementation(self) -> None:
-        p = norm(build_orchestration_prompt(make_info("implementation:ready")))
-        assert "implement the item" in p
 
-    def test_implementation_complete_directs_completion_verification(self) -> None:
-        p = norm(build_orchestration_prompt(make_info("implementation:complete")))
-        assert "verify its completion" in p
+class TestMechanicalSemantics:
+    """The 2026-10-19 reversal: mechanical clause execution, NOT open-ended
+    live-state progression. The Phase 3 dynamic language must be gone."""
 
-    def test_unmatched_label_reports_no_matching_workflow(self) -> None:
-        # The old (default) fallthrough clause: say so on the issue.
-        p = norm(build_orchestration_prompt(make_info("triage:whatever")))
-        assert "no matching workflow" in p
+    def test_prompt_orders_exact_mechanical_execution(self) -> None:
+        p = norm(build_orchestration_prompt(make_info("gh-issue-tracking:init-success")))
+        assert "selected mechanically" in p
+        assert "first match wins" in p
+        assert "Execute the clause's steps exactly, in order" in p
+        assert "do not skip its status updates" in p
+
+    def test_no_open_ended_progression_language_anywhere(self) -> None:
+        infos = [
+            make_info("gh-issue-tracking:init-success"),
+            epic_info(),
+            make_info("orchestration:plan-approved"),
+        ]
+        for info in infos:
+            p = build_orchestration_prompt(info)
+            for banned in (
+                "live tracking state",
+                "Discover from the tracking state",
+                "New application",
+                "swarm-plan",
+                "not a script to replay",
+            ):
+                assert banned not in p, f"{info.label} prompt still carries {banned!r}"
+
+    def test_label_cycle_is_the_state_machine(self) -> None:
+        p = norm(build_orchestration_prompt(epic_info()))
+        assert "the label cycle itself is the state machine" in p
+        assert "fires the next iteration of this clause" in p
+
+    def test_test_and_debug_modes_ported(self) -> None:
+        p = norm(build_orchestration_prompt(make_info("gh-issue-tracking:init-success")))
+        assert "Test and Debug Modes" in p
+        assert "TEST MODE: This is a test." in p
+        assert "DEBUG MODE:" in p
+
+    def test_discontinued_memory_graph_machinery_stripped(self) -> None:
+        # .agents/rules/tools.md: memory knowledge-graph + sequential-thinking
+        # discontinued 2026-09-12 — must not be re-added by the port.
+        p = build_orchestration_prompt(make_info("gh-issue-tracking:init-success"))
+        for banned in ("search_nodes", "knowledge graph", "sequential_thinking", "add_observations"):
+            assert banned not in p
 
 
-class TestOpenEndedSemantics:
-    """The Phase 3 exit criterion: labels are directed WITHOUT the old
-    clause-table's next-label chaining."""
+class TestHelperProcedures:
+    def test_post_status_update_procedure(self) -> None:
+        p = norm(build_orchestration_prompt(make_info("gh-issue-tracking:init-success")))
+        assert "postStatusUpdate(message)" in p
+        assert "gh issue comment <issue_number>" in p
+        assert "always create a new comment" in p
 
-    def test_no_next_label_chaining_anywhere_in_matrix(self) -> None:
-        for label in OLD_TABLE_LABELS:
-            if label == "gh-issue-tracking:direct-body":
-                continue  # verbatim body; chaining does not apply
-            p = build_orchestration_prompt(make_info(label))
-            for other in OLD_TABLE_LABELS:
-                if other != label:
-                    assert other not in p, f"{label} prompt chains onto {other}"
+    def test_find_next_unimplemented_epic_procedure(self) -> None:
+        p = norm(build_orchestration_prompt(make_info("gh-issue-tracking:init-success")))
+        assert "find_next_unimplemented_epic()" in p
+        assert "sub_issues" in p
+        assert 'select(.labels[].name == "epic")' in p
+        assert "by `number` ascending" in p
+        # Rev2 completion marker: closed epics are skipped; the deprecated
+        # rev1 implementation:complete label check is not used.
+        assert "If the epic is closed, skip it" in p
+        assert "the deprecated rev1 `implementation:complete` label check" in p
 
-    def test_progression_decided_from_live_tracking_state(self) -> None:
-        for label in ("orchestration:plan-approved", "gh-issue-tracking:init-success"):
-            p = norm(build_orchestration_prompt(make_info(label)))
-            assert "live tracking state" in p
-            assert "`gh` CLI" in p
-
-    def test_prompt_rejects_hardcoded_label_sequence(self) -> None:
-        p = norm(build_orchestration_prompt(make_info("orchestration:epic-ready")))
-        assert "never from" in p and "label sequence" in p
-        assert "state to read" in p
+    def test_title_parsing_helper_retired_for_issue_number_handoffs(self) -> None:
+        # The canonical implement-epic / review-epic-prs contract takes the
+        # epic ISSUE NUMBER ("Epic issue object or issue number"); a rev2
+        # `Epic <N>:` title ordinal is NOT the issue number, so the
+        # reference's extract_epic_from_title helper is retired. Found by the
+        # pre-merge real-opencode probe, verified against agent-instructions.
+        for info in (
+            make_info("gh-issue-tracking:init-success"),
+            epic_info(),
+        ):
+            p = build_orchestration_prompt(info)
+            assert "extract_epic_from_title" not in p
+            assert "$epic_id" not in p
+            assert "$implemented_epic" not in p
 
 
 class TestPromptContent:
     def test_carries_envelope_context_and_event_data(self) -> None:
-        info = make_info("orchestration:plan-approved")
+        info = make_info("gh-issue-tracking:init-success")
         p = build_orchestration_prompt(info)
         assert "owner/repo" in p
         assert "#12" in p
-        assert "orchestration:plan-approved" in p
+        assert "gh-issue-tracking:init-success" in p
         assert "d-77" in p
         assert '"sender"' in p  # EVENT_DATA payload JSON embedded
 
-    def test_names_paths_discovery_new_app_vs_existing_feature(self) -> None:
+    def test_workflow_definitions_fetched_fresh(self) -> None:
         p = norm(build_orchestration_prompt(make_info("gh-issue-tracking:init-success")))
-        assert "New application" in p
-        assert "swarm-plan" in p
-        assert "gh-issue-tracking-init" in p
-        assert "New feature in an existing application" in p
-        assert "Epic/Story/Task" in p
-        assert "Discover from the tracking state" in p
+        assert "agent-instructions repo" in p
+        assert "fetch their current content at runtime" in p
 
     def test_publish_and_verify_section_present(self) -> None:
-        p = norm(build_orchestration_prompt(make_info("orchestration:dispatch")))
+        p = norm(build_orchestration_prompt(epic_info()))
         assert "non-default branch" in p
-        assert "pull request" in p
         assert "Never push to the default branch" in p
         assert "reachable on the remote" in p
         assert "leave the issue open" in p
 
-    def test_workflow_definitions_fetched_fresh(self) -> None:
-        p = norm(build_orchestration_prompt(make_info("orchestration:epic-ready")))
-        assert "agent-instructions repo" in p
-        assert "entry point, not a fixed sequence" in p
+    def test_final_summary_section_present(self) -> None:
+        p = norm(build_orchestration_prompt(epic_info()))
+        assert "which clause matched" in p
 
     def test_tolerates_minimal_payload(self) -> None:
         # The smoke (and any non-webhook source) may carry a bare payload.
@@ -198,7 +276,7 @@ class TestPromptContent:
             repo="a/b",
             event="issues",
             action="labeled",
-            label="orchestration:plan",
+            label="gh-issue-tracking:init-success",
             payload={"smoke": True},
         )
         p = build_orchestration_prompt(info)
@@ -209,17 +287,24 @@ class TestPromptContent:
 
 class TestDeterminism:
     def test_same_envelope_same_prompt(self) -> None:
-        a = build_orchestration_prompt(make_info("orchestration:plan-approved"))
-        b = build_orchestration_prompt(make_info("orchestration:plan-approved"))
+        a = build_orchestration_prompt(make_info("gh-issue-tracking:init-success"))
+        b = build_orchestration_prompt(make_info("gh-issue-tracking:init-success"))
         assert a == b
 
     def test_payload_key_order_does_not_matter(self) -> None:
-        info = make_info("orchestration:plan-approved")
+        info = make_info("gh-issue-tracking:init-success")
         reordered = dict(reversed(list(info.payload.items())))
-        other = make_info("orchestration:plan-approved", payload=reordered)
+        other = make_info("gh-issue-tracking:init-success", payload=reordered)
         assert build_orchestration_prompt(info) == build_orchestration_prompt(other)
 
     def test_event_data_is_valid_json(self) -> None:
-        p = build_orchestration_prompt(make_info("orchestration:plan-approved"))
+        p = build_orchestration_prompt(make_info("gh-issue-tracking:init-success"))
         blob = p.rsplit("```json", 1)[1].split("```", 1)[0]
         assert json.loads(blob)["repository"]["full_name"] == "owner/repo"
+
+    def test_direct_body_with_braces_in_body_is_safe(self) -> None:
+        # Clause texts carry literal braces (`{ $epic = ... }`) and bodies may
+        # too; the builder must not re-scan substituted content.
+        body = 'weird {braces} and __ISSUE_BODY__ and {placeholders}'
+        p = build_orchestration_prompt(make_info("gh-issue-tracking:direct-body", body=body))
+        assert body in p

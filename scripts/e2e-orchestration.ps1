@@ -290,7 +290,7 @@ try {
 
     # -- Scenario 1: happy accept (workflow label) --------------------------
     $body = New-LabelPayload -Repo 'owner/e2e-repo' `
-        -Label 'orchestration:plan-approved' -Sender 'nam20485'
+        -Label 'gh-issue-tracking:init-success' -Sender 'nam20485'
     $resp = Invoke-GithubWebhook -Event 'issues' -DeliveryId 'e2e-accept-1' `
         -Body $body -Signature (Get-Signature -Body $body -Secret $WebhookSecret)
     Assert-Equal -Name 'happy accept returns 202' -Actual $resp.StatusCode -Expected 202

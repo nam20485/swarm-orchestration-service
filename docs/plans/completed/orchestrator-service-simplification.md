@@ -1,6 +1,6 @@
 # Orchestrator-Service Simplification — Analysis & Plan
 
-Status: COMPLETE — all §7 phases landed (Phase 0–5, 2026-09-10..11; final phase-5 merge PR #15); owner decisions folded 2026-09-10 (§5)
+Status: COMPLETE — all §7 phases landed (Phase 0–5, 2026-09-10..11; final phase-5 merge PR #15); owner decisions folded 2026-09-10 (§5). **§3.3's open-ended-prompt design SUPERSEDED 2026-10-19 by owner direction** — the mechanical rev2 clause table is restored; see [`docs/plans/restore-rev2-clause-table.md`](../restore-rev2-clause-table.md).
 Date: 2026-09-10
 Requirements source: [`docs/plans/completed/orchestrator-service-integration.md`](./orchestrator-service-integration.md) (owner's direction notes)
 Codebase surveyed (reference only): `nam20485/orchestrator-service` @ branch `nam20485`, HEAD `2bd6d06` (2026-09-10; working tree there has 38 modified + 2 untracked files — the old repo stays untouched per Decision 8; port listener/webhook code from it, do not build in it)
@@ -81,6 +81,14 @@ when they ship ACP agent support.
 *(ACP protocol specifics, launch commands, and per-client readiness: see §6.)*
 
 ### 3.3 Agent orchestration prompt
+
+> **SUPERSEDED (2026-10-19, owner direction):** the open-ended prompt this
+> section specifies was replaced by the restored mechanical rev2
+> `gh-issue-tracking:*` clause table — see
+> [`docs/plans/restore-rev2-clause-table.md`](../restore-rev2-clause-table.md).
+> The "agent decides progression from live tracking state" principle below is
+> withdrawn; the section is retained as history and as the regression context
+> for the Phase 3 implementation the clause table replaced.
 
 Replace `orchestration_prompt.jinja2.md`'s rigid clause table with an open-ended prompt carrying
 the workflow as pseudo-code / natural language (the owner's direction), e.g.:
