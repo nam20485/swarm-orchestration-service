@@ -27,8 +27,8 @@ class TestEmitAndRecent:
         assert events[0]["type"] == "webhook_received"
         assert events[0]["data"]["delivery_id"] == "d-1"
         assert events[0]["data"]["repo"] == "o/r"
-        epoch, _, seq = events[0]["id"].partition("-")
-        assert epoch.isdigit() and seq == "1"
+        epoch, boot, seq = events[0]["id"].split("-")
+        assert epoch.isdigit() and len(boot) == 8 and seq == "1"
 
     def test_ids_increase_monotonically(self) -> None:
         store = EventStore()
@@ -36,21 +36,23 @@ class TestEmitAndRecent:
         store.emit("b")
         ids = [e["id"] for e in store.recent()]
         assert len(set(ids)) == 2
-        (epoch_a, _, seq_a), (epoch_b, _, seq_b) = (i.partition("-") for i in ids)
-        assert epoch_a == epoch_b
+        (boot_a, _, seq_a), (boot_b, _, seq_b) = (i.rpartition("-") for i in ids)
+        assert boot_a == boot_b  # one boot prefix per store
         assert int(seq_b) == int(seq_a) + 1
 
     def test_ids_never_collide_across_a_restart(self, monkeypatch) -> None:
         # A UI tab left open across a redeploy dedupes by seen ids; the new
-        # process must never reissue an id the old one already used.
+        # process must never reissue an id the old one already used — even
+        # when the restart lands in the same clock second (a crash-looping
+        # container), which only the per-boot uuid token can cover.
         clock = _FakeClock(1_700_000_000.0)
         monkeypatch.setattr(event_store, "time", clock)
         before = EventStore()
         before.emit("a")
-        clock.now = 1_700_003_600.0  # an hour later: the restart
-        after = EventStore()
+        after = EventStore()  # zero clock jump: the crash-loop corner
         after.emit("a")
         assert before.recent()[0]["id"] != after.recent()[0]["id"]
+        assert before.recent()[0]["id"].split("-")[0] == after.recent()[0]["id"].split("-")[0]
 
     def test_recent_limit_returns_last_n(self) -> None:
         store = EventStore()

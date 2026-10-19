@@ -4,6 +4,7 @@ import itertools
 import queue
 import threading
 import time
+import uuid
 from collections import deque
 from collections.abc import Callable, Iterator
 from typing import Any
@@ -71,12 +72,14 @@ class EventStore:
         self._events: deque[dict[str, Any]] = deque(maxlen=maxlen)
         self._subscribers: list[queue.Queue[dict[str, Any] | None]] = []
         self._lock = threading.Lock()
-        # Ids are "<boot-epoch>-<seq>": the per-process counter alone would
-        # reset to 1 on restart and collide with the UI's seen-id set — every
-        # post-restart event at or below the old high-water mark would be
-        # silently deduped away (a tab left open across a redeploy freezes).
-        # The epoch prefix makes ids unique across restarts instead.
-        self._epoch = int(time.time())
+        # Ids are "<boot-epoch>-<boot-token>-<seq>": the per-process counter
+        # alone would reset to 1 on restart and collide with the UI's seen-id
+        # set — every post-restart event at or below the old high-water mark
+        # would be silently deduped away (a tab left open across a redeploy
+        # freezes). The epoch prefix alone still collides when a crash-looping
+        # container reboots inside the same clock second, so a per-boot uuid4
+        # token makes the id unique across restarts unconditionally.
+        self._boot = f"{int(time.time())}-{uuid.uuid4().hex[:8]}"
         self._counter = itertools.count(1)
         self._sink = sink
 
@@ -88,7 +91,7 @@ class EventStore:
         so persistence can never fail an emit.
         """
         event = {
-            "id": f"{self._epoch}-{next(self._counter)}",
+            "id": f"{self._boot}-{next(self._counter)}",
             "type": event_type,
             "ts": time.time(),
             "data": data,

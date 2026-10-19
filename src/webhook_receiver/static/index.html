@@ -274,12 +274,13 @@ const connect = () => {
     "agent_permission", "agent_finished",
   ]) {
     es.addEventListener(type, (ev) => {
-      const id = ev.lastEventId; // "<boot-epoch>-<seq>" — unique across restarts
+      const id = ev.lastEventId; // "<boot-epoch>-<boot-token>-<seq>" — unique across restarts
       // The ring replays on every (re)connect and the server ignores
-      // Last-Event-ID, so dedupe by membership. The epoch-prefixed server id
-      // keeps a restart from colliding with pre-restart ids — the old
-      // per-process counter reset to 1 and every post-redeploy event landed
-      // in this set already, freezing the feed until ids caught back up.
+      // Last-Event-ID, so dedupe by membership. The boot-prefixed server id
+      // (epoch + per-boot random token) keeps a restart from colliding with
+      // pre-restart ids — the old per-process counter reset to 1 and every
+      // post-redeploy event landed in this set already, freezing the feed
+      // until ids caught back up.
       if (seenIds.has(id)) return;
       seenIds.add(id);
       if (seenIds.size > 5000) seenIds.clear(); // bounded; replay window ≪ this
