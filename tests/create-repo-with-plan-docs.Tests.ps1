@@ -670,21 +670,9 @@ Describe 'Copy-PlanDocs (non-DryRun)' {
 
 Describe 'DryRun integration test' {
     BeforeAll {
-        # The Create path calls New-RepoSecret -SecretName 'GEMINI_API_KEY'
-        # (scripts/repo-functions.ps1). A -DryRun launch must survive an
-        # UNSET variable there — the dry-run branch warns instead of throwing
-        # (PR #20 review) — so the suite deliberately removes it for the walk
-        # and restores whatever the runner had afterwards.
-        $script:GeminiApiKeyOriginal = $env:GEMINI_API_KEY
-        Remove-Item Env:\GEMINI_API_KEY -ErrorAction SilentlyContinue
-    }
-
-    AfterAll {
-        if ($null -ne $script:GeminiApiKeyOriginal) {
-            $env:GEMINI_API_KEY = $script:GeminiApiKeyOriginal
-        } else {
-            Remove-Item Env:\GEMINI_API_KEY -ErrorAction SilentlyContinue
-        }
+        # GEMINI_API_KEY was retired from stage 1 (2026-09-23: no key — the
+        # New-RepoSecret call is commented out), so no env handling is needed
+        # for the dry-run walk anymore.
     }
 
     It 'Runs the full script in DryRun mode without error' {

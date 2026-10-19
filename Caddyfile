@@ -1,21 +1,38 @@
-# Reverse proxy in front of the webhook-receiver listener.
+# Reverse proxy in front of the webhook receiver.
 #
 # Ported from orchestrator-service @2bd6d06 (deploy/caddy/Caddyfile). The
 # external contract is unchanged: this site is the public surface and it
 # exposes ONLY the GitHub webhook path and the health probe — everything else
 # answers 404 so the public surface enumerates nothing.
 #
+# Upstream: 127.0.0.1:8080 = the HOST-RUN receiver (.venv/bin/python -m
+# webhook_receiver with ACP_ENABLED=true — the dispatch mode), bound to
+# loopback (WEBHOOK_HOST=127.0.0.1). Caddy runs in host-network mode
+# (compose.yaml), so this is a pure loopback hop — no container→host
+# bridge traffic (this host's firewall drops it), and the receiver's full
+# surface (incl. /events) is unreachable off-host. The compose receiver
+# container (listener-only) is not proxied in this posture; bring it back
+# by reverting the upstream to webhook-receiver:8080 (bridge mode).
+#
 # WEBHOOK_SITE_ADDRESS (compose env):
 #   :80                — HTTP only (local dev / behind external TLS)
 #   hooks.example.com  — automatic HTTPS (Let's Encrypt) on :443
 
 {$WEBHOOK_SITE_ADDRESS} {
+	# Full access logging (owner direction 2026-09-23: debug and regular
+	# sessions need the complete request stream, errors-only is not enough).
+	# Goes to the container's stderr = `docker compose logs webhook-proxy`.
+	log {
+		output stderr
+		level INFO
+	}
+
 	handle /webhooks/github {
-		reverse_proxy webhook-receiver:8080
+		reverse_proxy 127.0.0.1:8080
 	}
 
 	handle /health {
-		reverse_proxy webhook-receiver:8080
+		reverse_proxy 127.0.0.1:8080
 	}
 
 	# Catch-all: nothing else is public.

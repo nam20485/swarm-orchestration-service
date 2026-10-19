@@ -11,6 +11,13 @@
 
   <ItemGroup>
     <PackageReference Include="Aspire.Hosting.PostgreSQL" Version="13.4.6" />
+    <!-- No direct consumer — this is a transitive security pin.
+         Aspire.Hosting.PostgreSQL pulls MessagePack 2.5.302, which is
+         vulnerable to GHSA-qhrr-8q5h-9q3h / CVE-2026-92707 (patched in
+         2.5.303); removing this reference re-surfaces NU1902 in the AppHost
+         restore. Drop it once the Aspire stack's transitive MessagePack
+         reaches >= 2.5.303 on its own. -->
+    <PackageReference Include="MessagePack" Version="2.5.303" />
   </ItemGroup>
 
   <ItemGroup>

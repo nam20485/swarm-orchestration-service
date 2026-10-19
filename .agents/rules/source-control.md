@@ -8,7 +8,7 @@
 
 When asked to commit the current set of changes in the working copy, always:
 
-1. Run `validate.ps1` first; proceed only if it passes.
+1. Run `validation.ps1` first; proceed only if it passes.
 2. Break the changes into conceptual groups.
 3. Commit each group with a meaningful message.
 
@@ -76,3 +76,5 @@ mutation {
 ```
 
 After resolving all threads, verify zero unresolved comments remain by querying `reviewThreads` and filtering `isResolved == false`. Leave a final summary comment on the PR listing all resolved threads and their fixes.
+
+<!-- canary: indigo-badger-4 -->

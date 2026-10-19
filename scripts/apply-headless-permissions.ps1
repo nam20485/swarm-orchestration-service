@@ -3,13 +3,13 @@
 
 <#
 .SYNOPSIS
-    Relax agent-context permissions to headless-safe values on a freshly cloned
+    Relax swarm-context permissions to headless-safe values on a freshly cloned
     orchestrator-dispatched instance.
 
 .DESCRIPTION
     opencode resolves permissions in precedence order: built-in < global config
     < project config (.opencode/opencode.jsonc) < AGENT FRONTMATTER. The
-    agent-context template ships restrictive `ask` entries (correct for
+    swarm-context template ships restrictive `ask` entries (correct for
     INTERACTIVE use) at BOTH the project-config layer and — decisively — the
     agent-frontmatter layer. A headless orchestrator dispatch (`opencode run
     --attach`, no human responder) can NEVER answer an `ask`, so any `ask`

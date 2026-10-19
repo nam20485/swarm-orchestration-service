@@ -34,7 +34,8 @@ AcpHost.run                                             acp_host.py
   workspace: SwarmSandbox materialized clone (SANDBOX_ENABLED,
   sandbox_bridge.py) or plain scratch dir
   belt-and-braces opencode.json deny-list written into the workspace
-  spawn `opencode acp --cwd <workspace>`; initialize -> session/new ->
+  spawn `opencode acp` with the workspace as process cwd
+  (opencode >= 2.0 has no --cwd flag); initialize -> session/new ->
   one prompt (the envelope's own) -> collect stop reason
   session/update notifications mapped into the EventStore
   session/request_permission answered by acp_policy.py
@@ -52,12 +53,26 @@ The single source of truth for event names and payload fields is the
   `webhook_accepted`, `webhook_duplicate`
 - queue lifecycle: `prompt_queued`, `prompt_consumed` (with `ok`)
 - sandbox bridge: `sandbox_provisioned`, `sandbox_released`
-- ACP session: `agent_session_started`, `agent_message_chunk`,
-  `agent_tool_call`, `agent_usage`, `agent_permission`, `agent_finished`
-  (all carry `run_id` = the envelope id)
+- ACP session — ALL-traces (webui plan W0): `user_message_chunk`,
+  `agent_session_started`, `agent_message_chunk`, `agent_thought_chunk`,
+  `agent_tool_call`, `agent_plan`, `agent_plan_update`,
+  `agent_plan_removed`, `agent_commands_update`, `agent_mode_update`,
+  `agent_session_info`, `agent_config_update`, `agent_update`
+  (unrecognized kinds, never dropped), `agent_usage`, `agent_permission`,
+  `agent_finished` (all carry `run_id` = the envelope id; structured
+  payloads keep the protocol's wire field names)
 
-`GET /events` streams these over SSE (`text/event-stream`): full ring-buffer
-replay on subscribe, then live fan-out, `: keepalive` comments when idle
+`GET /` serves the observability page (webui plan W2): one static
+HTML+JS file, no build step — live feed (SSE client), run history with
+per-run traces, and the durable webhook tail. `GET /events` streams these
+over SSE (`text/event-stream`): full ring-buffer replay on subscribe, then
+live fan-out, `: keepalive` comments when idle.
+Durable history (webui plan W1, `WEBHOOK_EVENTS_LOG_ENABLED`): every emit is
+appended as JSONL under `ACP_TRACE_ROOT` — `<run_id>/events.jsonl` per run
+(beside `harness.log`/`manifest.json` from `trace_log`), a rotated
+root-level `events.jsonl` for pre-envelope webhook events — and read back
+via `GET /runs` (index, newest first, manifests merged) and
+`GET /runs/{run_id}/events` (full per-run history, survives restarts)
 (`WEBHOOK_EVENTS_KEEPALIVE`, default 15 s). Each frame carries `id`
 (monotonic store sequence), `event` (the name above), and `data` (JSON).
 Consume it with any SSE client:

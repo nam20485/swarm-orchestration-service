@@ -41,3 +41,5 @@ For multi-step tasks, state a brief plan with explicit verification:
 ```
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+
+<!-- canary: umber-fox-21 -->

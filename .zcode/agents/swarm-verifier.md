@@ -2,8 +2,8 @@
 name: "swarm-verifier"
 description: "Read-only-plus-Bash swarm worker that runs the goal's verification commands and reports pass/fail with exact output. Proves whether a round met its Done-when criteria; never fixes failures."
 color: purple
-model: "custom:builtin%3Azai-coding-plan:GLM-5.3-Flash"
-thoughtLevel: off
+model: "account:zai-individual-coding-plan/GLM-5.3-Flash"
+thoughtLevel: low
 injectAgentsMd: false
 tools: [Read, Grep, Glob, Bash]
 maxTurns: 25

@@ -1,0 +1,139 @@
+# Repository & Clone Lifecycle
+
+The approved map of who seeds whom (owner-approved 2026-09-23, provenance
+report: [docs/4-repo-system-lifecycle.md](../../docs/4-repo-system-lifecycle.md)) —
+load this before touching the launcher, the templates, the dispatch chain,
+or hunting for anything "missing" inside a clone. Per-script inventory and
+stage-by-stage pipeline detail live in [scripts.md](scripts.md); the
+dispatch plan of record in
+[docs/plans/dispatch-in-live-checkout.md](../../docs/plans/dispatch-in-live-checkout.md).
+
+## Five roles (who seeds whom)
+
+1. **This repo** — `nam20485/swarm-orchestration-service`: the lifecycle
+   owner. The launcher (`scripts/create-repo-agent-context.ps1` and stage
+   scripts), the webhook receiver (`src/webhook_receiver`), the ACP
+   dispatch host, the SwarmSandbox solution (`src/SwarmSandbox` — the
+   service runs it, the parent template does not carry it), and the ZCode
+   swarm system (`.zcode/agents/`, [swarm.md](swarm.md)) live here.
+   `isTemplate: false` — never a stamper itself.
+2. **`nam20485/swarm-context`** — **the parent template (the clone
+   stamper)**: `isTemplate: true`, public, default branch `development`,
+   pruned to **"agent-context base + swarm surfaces"** (owner decision
+   2026-09-23): the full ZCode swarm set (`.zcode/agents/swarm-*.md` —
+   byte-identical to this repo's), `.agents/rules/swarm.md` +
+   `swarm-workers.md`, the `$swarm` and `swarm-plan` skills, and the
+   agent-context base tree — nothing service-side.
+3. **`intel-agency/agent-context`** — the grandparent: the upstream base
+   of the parent (one-way reviewed-PR flow; the parent's `upstream` push
+   is DISABLEd). Historical note: **it was the stamper before the
+   2026-09-23 flip** — every clone minted before then (all
+   `gap-miner-v2-*`) carries its tree, which is why they have no
+   `.zcode/` and `default_agent: "orchestrator"`.
+4. **`nam20485/workflow-launch2`** — the `plan_docs/` app-plan slug store
+   (read via `-PlanDocsRoot` from the sibling checkout; deliberately not
+   folded in). **Stale launcher copies still sit in its `scripts/`** —
+   always run the launcher from this repo, never from there.
+5. **The dispatch clones** — `intel-agency/<slug>-<suffix>` (suffix = NATO
+   word + number: `alpha61`, `charlie11`, …), checked out at
+   `~/src/github/nam20485/dynamic_workflows/<repo>`. Lived-in opencode
+   workspaces; the ACP host's dispatch sessions run inside them
+   (`ACP_CLONE_ROOT`).
+
+## Launch chain (minting a repo)
+
+```text
+./scripts/create-repo-agent-context.ps1 -Slug <app_plan_doc_slug> -Yes
+  ===> intel-agency/<slug>-<suffix>   (suffix ∈ NATO: alpha, bravo, charlie, …)
+```
+
+Stage 1 stamps the base tree from `nam20485/swarm-context` (GitHub
+template route ⇒ squashed seed, no git ancestry; `gh repo view <clone>
+--json templateRepository` records the source), copies the slug's plan
+docs, rewrites placeholders + AGENTS.md instance identity, then:
+Class-2 cleanup → headless permissions → model-pin strip → amend seed
+commit → labels import → dispatch issue #1 (`/gh-issue-tracking-init`
+under `gh-issue-tracking:direct-body`) awaiting relabel.
+
+## Envelope path (webhook → agent session)
+
+org webhook (intel-agency) → funnel (tailscale) → Caddy (`webhook-proxy`)
+→ receiver (`webhook-receiver`, compose; **listener-only**,
+`ACP_ENABLED=false` — the image has no opencode) → PromptInfo queue →
+consumer. Dispatch executes **host-side**: host-run receiver with
+`ACP_ENABLED=true` +
+`ACP_CLONE_ROOT=~/src/github/nam20485/dynamic_workflows`, one cold opencode
+session per envelope, cwd = the clone (cwd-is-clone is load-bearing for
+`/gh-issue-tracking-init`).
+
+## What a minted clone contains
+
+Post-flip clones (stamped from swarm-context) carry the agent-context base
+(template opencode octet, `default_agent: "orchestrator"`, helper
+scripts, `.agents/` system) **plus the full swarm surfaces** —
+`.zcode/agents/` (ZCode parity), swarm rules, `$swarm` / `swarm-plan`
+skills — plus `plan_docs/`, the 32 dispatch labels, and issue #1.
+
+Pre-flip clones (every `gap-miner-v2-*` minted before 2026-09-23) carry
+the agent-context tree only: **no `.zcode/` — never seeded, never
+deleted**; their stamper simply didn't have it. That was the answer to
+the original "who killed `.zcode/`" question: nobody — it was never
+there.
+
+## ACP client parity rule (owner decision, 2026-09-22)
+
+Two ACP clients are in play and **both are kept**: opencode (clone-mode
+dispatch, the first client) and ZCode (the sandbox runs ZCode with its
+`.zcode/` config). Everything stays in parity between them — agent
+definitions and client configs exist on both sides, mirrored. Rule for any
+additional ACP client: (1) **additive** — adding a client never removes or
+breaks the ones already driven; (2) **mirror the existing ACP client
+configs** — same agent set, same rules and intent, expressed in the new
+client's native format. Swarm-surface edits land in the **parent template**
+(so they stamp into clones) and sync down here via the reviewed-PR
+upstream flow.
+
+## Agent-definition map (which harness reads which directory)
+
+| Harness | Directory | Swarm defs? |
+| --- | --- | --- |
+| ZCode — swarm workers | `.zcode/agents/` (parent template + this repo, byte-identical) | yes — the `swarm-*.md` set |
+| ZCode — global | `~/.zcode/agents/` | no (octet only) |
+| opencode — swarm (king + workers) | `.opencode/agents/swarm-*.md` (parent template + this repo, mirrored) | yes — opencode ports of the ZCode defs; `default_agent: swarm-orchestrator` |
+| opencode — user level | `~/.config/opencode/agent/` | no |
+| opencode — clone level | `<clone>/.opencode/agents/` (stamped from the parent) | yes, post-port — the king (`swarm-orchestrator`, primary mode, runs dispatches himself) + the worker roster (subagent mode) |
+
+The ACP dispatch path drives **opencode**, so the opencode ports are what
+dispatched sessions load: the king (`swarm-orchestrator`, the default
+agent) executes solo dispatches himself — `/gh-issue-tracking-init` among
+them — and swarms via the `task` tool to the subagent-mode workers when
+the work earns it. The ZCode defs stay canonical for ZCode-harness runs
+(and the sandbox); keep the two sets mirrored — same roster, same rules,
+each harness's native frontmatter. Model pins in the ports
+(`zai-coding-plan/glm-5.3-flash` workers, `qwencloud/qwen3.8-max` king)
+are stripped at clone-mint time by `strip-model-settings.ps1`, per plan
+Decision 10.
+
+### Frontmatter mapping (ZCode ↔ opencode)
+
+Verified 2026-09-27 against `.zcode/agents/swarm-orchestrator.md`,
+`.opencode/agents/swarm-orchestrator.md`, `opencode debug agent
+swarm-orchestrator` and the published `https://opencode.ai/config.json`
+(`AgentConfig` keys). The harnesses are **not** field-for-field: parity is by
+effect, and one side may satisfy it in host config rather than in the repo
+file.
+
+| Intent | ZCode (repo file) | opencode |
+| --- | --- | --- |
+| Model pin | King: `model: 91b0a8e2-0f6e-4c15-9047-77d99187a400/qwen3.8-max` (custom-provider UUID). Workers: `model: "account:zai-individual-coding-plan/GLM-5.3-Flash"`. **The selection vocabulary is not the registry vocabulary:** `~/.zcode/v2/config.json` keys providers as `builtin:zai-coding-plan`, `builtin:zai`, `<uuid>`, …, but a `model:` value must be `<scope>/<modelId>` where scope is `account:<plan>` or a custom-provider UUID (a bare `<modelId>` also loads). Using a registry key fails at spawn with `Provider unavailable / 供应商不存在或不可用 [reason=provider-not-found; selection=builtin:zai-coding-plan/GLM-5.3-Flash]` — verified 2026-09-27. Confirm any form from live telemetry before shipping it: `~/.zcode/cli/rollout/model-io-*.jsonl` → `model.providerId` / `model.modelId` | `model: qwencloud/qwen3.8-max` / `zai-coding-plan/glm-5.3-flash`. Resolve with `opencode debug agent <name>` → `model.providerID` / `model.modelID` |
+| Reasoning depth | `thoughtLevel: xhigh` (king), `low` (workers) | **No agent-level field.** `AgentConfig` offers only `variant`, and no variant is declared for these providers. The king's `xhigh` is satisfied in the **project config** `.opencode/opencode.jsonc` (mirrored into clones by the parent template): provider `qwencloud` → `qwen3.8-max` with `options.thinking = {type: enabled, budgetTokens: 99072, reasoning_effort: "xhigh"}` and `temperature: 0.6`. Project outranks host config (built-in < global < project < session < agent frontmatter, per `strip-model-settings.ps1`'s header — and the strip only removes model *selections*, not provider definitions), so this is the layer dispatch sessions actually resolve. Host config `~/.config/opencode/opencode.jsonc` mirrors the same block as fallback |
+| Project instructions | `injectAgentsMd: true` or `false` | Unconditional — AGENTS.md is always loaded and no knob exists, so `true` needs no counterpart and `false` cannot be expressed (the ports say "workers run without the project instructions" in prose instead) |
+| Spawning workers | Agent tool, `run_in_background: true`, `TaskOutput` / `TaskStop` | `task` tool with the agent type named; the tool's own cancellation |
+
+Consequence: a ZCode-only frontmatter change (model id syntax, `thoughtLevel`,
+`injectAgentsMd`) can already be at parity on the opencode side with **no edit**
+to `.opencode/agents/`. Read the resolved opencode config before porting, and
+record the asymmetry here rather than inventing a field — unknown frontmatter
+keys are silently routed into `options` and do nothing.
+
+<!-- canary: sienna-vole-15 -->

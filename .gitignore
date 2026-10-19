@@ -1,5 +1,12 @@
-# Kilo agent session state
-.kilo/
+# Kilo agent state — keep only the agent definitions, project commands, and
+# skills; worktrees and runtime state stay local. `.kilo/agent/` (singular) is
+# where Kilo writes generated agent defs and is read alongside `.kilo/agents/`;
+# `.kilo/commands/` holds project slash-command/workflow .md files.
+.kilo/*
+!.kilo/agents/
+!.kilo/agent/
+!.kilo/commands/
+!.kilo/skills/
 
 # gh-issue-tracking-init forensic run logs (one timestamped file per run)
 gh-init-*.log
@@ -69,3 +76,6 @@ desktop.ini
 
 # .NET test results (validation.ps1 -Step dotnet writes TestResults/)
 TestResults/
+
+# swarm telemetry run artifact (created/appended by swarm-analyst; never committed)
+docs/swarm-metrics.md

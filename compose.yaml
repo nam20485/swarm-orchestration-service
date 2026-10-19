@@ -10,8 +10,11 @@
 #   OS_WEBHOOK_SECRET=<the GitHub App webhook secret>
 # Optional: WEBHOOK_SITE_ADDRESS (default :80) plus the listener knobs
 # forwarded below (WEBHOOK_LOG_LEVEL, WEBHOOK_MAX_BODY_BYTES,
-# WEBHOOK_EVENTS_KEEPALIVE, DIRECT_BODY_ALLOWED_SENDERS, and ACP_ENABLED
-# (default false — see its comment) — see .env.example.
+# WEBHOOK_EVENTS_KEEPALIVE, WEBHOOK_EVENTS_MAXLEN,
+# WEBHOOK_EVENTS_LOG_ENABLED, and DIRECT_BODY_ALLOWED_SENDERS — see
+# .env.example. ACP_* and SANDBOX_* are host-run-only: the compose image
+# has no opencode and no docker, so agent sessions cannot run there
+# (ACP_ENABLED is pinned false below).
 services:
   webhook-receiver:
     build:
@@ -22,38 +25,53 @@ services:
       - "8080"
     environment:
       - OS_WEBHOOK_SECRET=${OS_WEBHOOK_SECRET:?OS_WEBHOOK_SECRET is required}
-      # The image has no opencode, so the consumer must keep the Phase 1
-      # mark-consumed placeholder instead of attempting (and failing) ACP
-      # sessions per envelope. Host runs set ACP_ENABLED=true for dispatch.
-      - ACP_ENABLED=${ACP_ENABLED:-false}
+      # Pinned false — the image has no opencode, so the container must keep
+      # the Phase 1 mark-consumed placeholder. Dispatch runs host-side
+      # (.env ACP_ENABLED=true is deliberately NOT forwarded here: a .env
+      # true leaking into this image would fail-close every envelope).
+      - ACP_ENABLED=false
       - WEBHOOK_HOST=0.0.0.0
       - WEBHOOK_PORT=8080
       - WEBHOOK_LOG_LEVEL=${WEBHOOK_LOG_LEVEL:-info}
         # Defaults below mirror src/webhook_receiver/config.py — keep in sync.
       - WEBHOOK_MAX_BODY_BYTES=${WEBHOOK_MAX_BODY_BYTES:-26214400}
       - WEBHOOK_EVENTS_KEEPALIVE=${WEBHOOK_EVENTS_KEEPALIVE:-15}
+      - WEBHOOK_EVENTS_MAXLEN=${WEBHOOK_EVENTS_MAXLEN:-1000}
+      - WEBHOOK_EVENTS_LOG_ENABLED=${WEBHOOK_EVENTS_LOG_ENABLED:-true}
       - DIRECT_BODY_ALLOWED_SENDERS=${DIRECT_BODY_ALLOWED_SENDERS:-}
+    volumes:
+      # Durable event tail (WEBHOOK_EVENTS_LOG_ENABLED, default true): the
+      # trace root lives inside the container filesystem, so without this
+      # volume every recreate wipes events.jsonl and /runs, /runs/{id}/events
+      # and /events/history go silently empty. The image pre-creates the
+      # directory (Dockerfile.webhook) so the empty named volume initializes
+      # app-writable; retention rides ACP_TRACE_KEEP_RUNS as on the host.
+      - webhook_events:/app/logs/runs
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
 
   webhook-proxy:
     # Digest pinned; same caddy:2.10.0-alpine pin as the reference repo.
+    # Digest re-verified against registry-1.docker.io 2026-10-18. (An interim
+    # tag-only line here carried a one-char typo'd digest — …8da8e1e91a… —
+    # which is why digest refs appeared to 404; the real …8da8e1a91a… resolves.)
     image: caddy:2.10.0-alpine@sha256:ae4458638da8e1a91aafffb231c5f8778e964bca650c8a8cb23a7e8ac557aa3c
-    cap_add:
-      - CAP_NET_BIND_SERVICE
-    ports:
-      - "80:80"
+    # Cutover posture (owner decision 2026-09-23: keep the funnel
+    # endpoint): host-network mode — caddy binds the host's :80 directly
+    # and proxies the HOST-RUN dispatch receiver on loopback. No
+    # container→host bridge hop (this host's firewall drops those), and
+    # the receiver's full surface (/events) is loopback-only.
+    network_mode: host
     environment:
       - WEBHOOK_SITE_ADDRESS=${WEBHOOK_SITE_ADDRESS:-:80}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
-    depends_on:
-      - webhook-receiver
     restart: unless-stopped
 
 volumes:
   caddy_data:
   caddy_config:
+  webhook_events:

@@ -7,20 +7,36 @@ no pytest-asyncio dependency)."""
 from __future__ import annotations
 
 import asyncio
+import os
 import contextlib
 import json
+import logging
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from acp.schema import (
     AgentMessageChunk,
+    AgentPlanContentUpdate,
+    AgentPlanRemovedUpdate,
+    AgentPlanUpdate,
+    AgentThoughtChunk,
+    AvailableCommand,
+    AvailableCommandsUpdate,
+    ConfigOptionUpdate,
+    CurrentModeUpdate,
     PermissionOption,
+    PlanEntry,
+    PlanUpdateItems,
+    SessionConfigOptionBoolean,
+    SessionInfoUpdate,
     TextContentBlock,
     ToolCallProgress,
     ToolCallStart,
     UsageUpdate,
+    UserMessageChunk,
 )
 
 import webhook_receiver.acp_host as acp_host_module
@@ -29,6 +45,8 @@ from webhook_receiver.acp_host import (
     AcpHostError,
     AcpRunResult,
     HostClient,
+    SessionWatchdogTimeout,
+    _resolve_prompt_race,
     build_prompt,
     resolve_opencode_bin,
 )
@@ -56,6 +74,9 @@ def make_settings(tmp_path: Path, **acp: object) -> Settings:
         "acp_step_timeout": 1.0,
         "acp_prompt_timeout": 1.0,
         "acp_opencode_bin": "opencode-test-stub",
+        # Keep trace artifacts inside tmp_path: the default root is relative to
+        # the cwd, which would write into the repo's own logs/ tree.
+        "acp_trace_root": str(tmp_path / "trace"),
     }
     params.update(acp)
     return Settings(**params)  # type: ignore[arg-type]
@@ -100,14 +121,21 @@ class FakeProc:
     ``asyncio.run``.
     """
 
-    def __init__(self, stderr_text: str | None = None) -> None:
+    def __init__(self, stderr_text: str | None = None,
+                 stderr_stream: object | None = None) -> None:
         self.returncode: int | None = None
         self.killed = False
         self._stderr_text = stderr_text
+        self._stderr_stream = stderr_stream
         self.stderr: asyncio.StreamReader | None = None
 
     def materialize_stderr(self) -> None:
-        if self._stderr_text is not None and self.stderr is None:
+        if self.stderr is not None:
+            return
+        if self._stderr_stream is not None:
+            self.stderr = self._stderr_stream  # type: ignore[assignment]
+            return
+        if self._stderr_text is not None:
             reader = asyncio.StreamReader()
             reader.feed_data(self._stderr_text.encode())
             reader.feed_eof()
@@ -121,6 +149,22 @@ class FakeProc:
         return self.returncode or 0
 
 
+class TimedStderr:
+    """StreamReader stand-in for the stderr-drain path: yields one line
+    per ``interval`` (a harness still logging), then EOF — fuel for the
+    idle-watchdog secondary-liveness-signal tests."""
+
+    def __init__(self, text: str, interval: float) -> None:
+        self._lines = text.encode().splitlines(keepends=True)
+        self._interval = interval
+
+    async def readline(self) -> bytes:
+        if not self._lines:
+            return b""
+        await asyncio.sleep(self._interval)
+        return self._lines.pop(0)
+
+
 class FakeConn:
     """Canned ACP connection: initialize/new_session/prompt + updates."""
 
@@ -129,19 +173,27 @@ class FakeConn:
         stop_reason: str = "end_turn",
         prompt_exc: Exception | None = None,
         delay: float = 0.0,
+        update_interval: float | None = None,
+        init_delay: float = 0.0,
     ) -> None:
         self.client: object | None = None
         self.stop_reason = stop_reason
         self.prompt_exc = prompt_exc
         self.delay = delay
+        # When set, emit a session_update heartbeat every interval while the
+        # delay elapses (idle-watchdog tests: a live-but-slow session).
+        self.update_interval = update_interval
+        # Handshake latency (initialize): a slow spawn+handshake must not
+        # debit the idle watchdog's budget (PR #50 review).
+        self.init_delay = init_delay
         self.calls: list[tuple] = []
         self.prompt_texts: list[str] = []
 
     async def initialize(self, protocol_version: int, **_: object):
         self.calls.append(("initialize", protocol_version))
-        # Yield once so scheduled tasks (stderr drainer) get a loop turn,
-        # like real I/O would.
-        await asyncio.sleep(0)
+        # Yield so scheduled tasks (stderr drainer) get a loop turn, like
+        # real I/O would.
+        await asyncio.sleep(self.init_delay or 0)
         return SimpleNamespace(protocol_version=protocol_version)
 
     async def new_session(self, cwd: str, **_: object):
@@ -152,7 +204,22 @@ class FakeConn:
         self.calls.append(("prompt", session_id))
         self.prompt_texts = [b.text for b in prompt]
         if self.delay:
-            await asyncio.sleep(self.delay)
+            if self.update_interval:
+                # heartbeat while working: resets the idle watchdog's clock
+                elapsed = 0.0
+                while elapsed < self.delay:
+                    await asyncio.sleep(self.update_interval)
+                    elapsed += self.update_interval
+                    if self.client is not None:
+                        await self.client.session_update(
+                            session_id,
+                            AgentMessageChunk(
+                                session_update="agent_message_chunk",
+                                content=TextContentBlock(type="text", text="tick"),
+                            ),
+                        )
+            else:
+                await asyncio.sleep(self.delay)
         if self.prompt_exc is not None:
             raise self.prompt_exc
         # Real SDK: session/update notifications drain before prompt returns.
@@ -197,8 +264,14 @@ def install_spawn(
     calls: list,
 ) -> None:
     @contextlib.asynccontextmanager
-    async def fake_spawn(client: object, command: str, *args: str):
-        calls.append((client, command, args))
+    async def fake_spawn(
+        client: object,
+        command: str,
+        *args: str,
+        cwd: str | None = None,
+        env: dict | None = None,
+    ):
+        calls.append((client, command, args, cwd, env))
         conn.client = client
         proc.materialize_stderr()  # bind the reader to the running loop
         try:
@@ -212,6 +285,18 @@ def install_spawn(
             proc.returncode = proc.returncode or 0
 
     monkeypatch.setattr(acp_host_module, "spawn_agent_process", fake_spawn)
+
+
+async def _settle(
+    result: Any = None, exc: BaseException | None = None, delay: float = 0.0
+) -> Any:
+    """Complete — immediately or after ``delay`` — with ``result`` or by
+    raising ``exc``: task fuel for the prompt/watchdog race tests."""
+    if delay:
+        await asyncio.sleep(delay)
+    if exc is not None:
+        raise exc
+    return result
 
 
 def events_of_type(store: EventStore, type_: str) -> list[dict]:
@@ -266,14 +351,17 @@ class TestRunHappyPath:
 
         asyncio.run(AcpHost(cfg, EventStore()).run(make_info()))
 
-        (client, command, args) = calls[0]
+        (client, command, args, cwd, env) = calls[0]
         assert isinstance(client, HostClient)
         assert command == "/bin/opencode-fake"
-        assert args[0] == "acp"
-        assert args[1] == "--cwd"
-        assert Path(args[2]).is_dir()
+        assert args[0] == "acp"  # trace flags may follow; --cwd never does
+        assert Path(cwd).is_dir()
+        # the full parent env rides along (the SDK trims it otherwise),
+        # minus the receiver's own webhook signing secret
+        assert env is not None and env.get("PATH") == os.environ.get("PATH")
+        assert "OS_WEBHOOK_SECRET" not in env
         # new_session received the same workspace cwd
-        assert conn.calls[1][1] == args[2]
+        assert conn.calls[1][1] == cwd
 
     def test_prompt_derived_from_envelope(self, tmp_path, monkeypatch) -> None:
         cfg = make_settings(tmp_path)
@@ -347,7 +435,7 @@ class TestRunHappyPath:
 
         asyncio.run(AcpHost(cfg, EventStore()).run(make_info()))
 
-        assert calls[0][2][2].startswith(str(tmp_path / "swarm-acp-workspaces"))
+        assert calls[0][3].startswith(str(tmp_path / "swarm-acp-workspaces"))
 
     def test_stderr_drained_with_redaction(self, tmp_path, monkeypatch, caplog) -> None:
         cfg = make_settings(tmp_path)
@@ -370,6 +458,160 @@ class TestRunHappyPath:
         result = asyncio.run(AcpHost(cfg, EventStore()).run(make_info()))
 
         assert result.stop_reason == "refusal"
+
+
+class TestHarnessTrace:
+    """S1 — the harness log tap (docs/plans/harness-trace-parity.md D1/D7)."""
+
+    def test_spawn_requests_print_logs_at_info_by_default(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        cfg = make_settings(tmp_path)
+        conn, proc, calls = FakeConn(), FakeProc(), []
+        install_spawn(monkeypatch, conn, proc, calls)
+
+        asyncio.run(AcpHost(cfg, EventStore()).run(make_info()))
+
+        args = calls[0][2]
+        assert args[0] == "acp"
+        assert args[1:] == ("--print-logs", "--log-level", "info")
+
+    def test_harness_log_level_setting_reaches_the_spawn(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        cfg = make_settings(tmp_path, acp_harness_log_level="DEBUG")
+        conn, proc, calls = FakeConn(), FakeProc(), []
+        install_spawn(monkeypatch, conn, proc, calls)
+
+        asyncio.run(AcpHost(cfg, EventStore()).run(make_info()))
+
+        # a legacy uppercase value still reaches the CLI lowercased
+        assert calls[0][2][1:] == ("--print-logs", "--log-level", "debug")
+
+    def test_trace_disabled_spawns_no_log_flags(self, tmp_path, monkeypatch) -> None:
+        cfg = make_settings(tmp_path, acp_trace_enabled=False)
+        conn, proc, calls = FakeConn(), FakeProc(), []
+        install_spawn(monkeypatch, conn, proc, calls)
+
+        asyncio.run(AcpHost(cfg, EventStore()).run(make_info()))
+
+        args = calls[0][2]
+        assert args == ("acp",)  # no --print-logs / --log-level
+
+    def test_stderr_surfaced_at_info_with_harness_label(
+        self, tmp_path, monkeypatch, caplog
+    ) -> None:
+        cfg = make_settings(tmp_path)
+        conn, calls = FakeConn(), []
+        proc = FakeProc(stderr_text="message=loop session.id=ses-1 step=2\n")
+        install_spawn(monkeypatch, conn, proc, calls)
+
+        with caplog.at_level("INFO", logger="webhook_receiver.acp_host"):
+            asyncio.run(AcpHost(cfg, EventStore()).run(make_info()))
+
+        harness = [r for r in caplog.records if "[harness]" in r.getMessage()]
+        assert harness, "the harness line never reached the logger"
+        assert all(r.levelno == logging.INFO for r in harness)
+        assert "message=loop session.id=ses-1 step=2" in harness[0].getMessage()
+
+    def test_trace_disabled_keeps_stderr_at_debug(
+        self, tmp_path, monkeypatch, caplog
+    ) -> None:
+        cfg = make_settings(tmp_path, acp_trace_enabled=False)
+        conn, calls = FakeConn(), []
+        proc = FakeProc(stderr_text="message=loop step=2\n")
+        install_spawn(monkeypatch, conn, proc, calls)
+
+        with caplog.at_level("DEBUG", logger="webhook_receiver.acp_host"):
+            asyncio.run(AcpHost(cfg, EventStore()).run(make_info()))
+
+        harness = [r for r in caplog.records if "[harness]" in r.getMessage()]
+        assert harness, "stderr must still be drained when trace capture is off"
+        assert all(r.levelno == logging.DEBUG for r in harness)
+
+    def test_harness_lines_are_redacted(self, tmp_path, monkeypatch, caplog) -> None:
+        cfg = make_settings(tmp_path)
+        conn, calls = FakeConn(), []
+        proc = FakeProc(stderr_text="connecting token=supersecret ok\n")
+        install_spawn(monkeypatch, conn, proc, calls)
+
+        with caplog.at_level("INFO", logger="webhook_receiver.acp_host"):
+            asyncio.run(AcpHost(cfg, EventStore()).run(make_info()))
+
+        assert "supersecret" not in caplog.text
+        assert "token=<redacted>" in caplog.text
+
+    def test_run_writes_trace_artifacts(self, tmp_path, monkeypatch) -> None:
+        """S2: one run leaves harness.log + manifest.json under the trace root."""
+        cfg = make_settings(tmp_path)
+        conn, calls = FakeConn(), []
+        proc = FakeProc(stderr_text="message=loop step=0\nmessage=stream modelID=x\n")
+        install_spawn(monkeypatch, conn, proc, calls)
+        info = make_info()
+
+        asyncio.run(AcpHost(cfg, EventStore()).run(info))
+
+        run_dir = tmp_path / "trace" / info.id
+        lines = (run_dir / "harness.log").read_text(encoding="utf-8").splitlines()
+        assert lines == ["message=loop step=0", "message=stream modelID=x"]
+
+        manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+        assert manifest["run_id"] == info.id
+        assert manifest["delivery_id"] == "d-1"
+        assert manifest["repo"] == "owner/repo"
+        assert manifest["label"] == "orchestration:plan"
+        assert manifest["session_id"] == "sess-1"
+        assert manifest["ok"] is True
+        assert manifest["stop_reason"] == "end_turn"
+        assert manifest["started_at"] and manifest["ended_at"]
+        assert manifest["workspace"]  # the session cwd, for joining back
+
+    def test_trace_disabled_writes_no_artifacts(self, tmp_path, monkeypatch) -> None:
+        cfg = make_settings(tmp_path, acp_trace_enabled=False)
+        conn, calls = FakeConn(), []
+        proc = FakeProc(stderr_text="message=loop step=0\n")
+        install_spawn(monkeypatch, conn, proc, calls)
+
+        asyncio.run(AcpHost(cfg, EventStore()).run(make_info()))
+
+        assert not (tmp_path / "trace").exists()
+
+    def test_failed_run_records_the_error_in_the_manifest(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        cfg = make_settings(tmp_path)
+        conn, calls = FakeConn(prompt_exc=RuntimeError("boom")), []
+        proc = FakeProc(stderr_text="message=loop step=0\n")
+        install_spawn(monkeypatch, conn, proc, calls)
+        info = make_info()
+
+        with pytest.raises(AcpHostError):
+            asyncio.run(AcpHost(cfg, EventStore()).run(info))
+
+        run_dir = tmp_path / "trace" / info.id
+        manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+        assert manifest["ok"] is False
+        assert "boom" in manifest["error"]
+        assert manifest["ended_at"]
+        # The lines written before the failure survive.
+        assert (run_dir / "harness.log").read_text(encoding="utf-8").startswith(
+            "message=loop step=0"
+        )
+
+    def test_harness_log_file_is_redacted(self, tmp_path, monkeypatch) -> None:
+        cfg = make_settings(tmp_path)
+        conn, calls = FakeConn(), []
+        proc = FakeProc(stderr_text="connecting token=supersecret ok\n")
+        install_spawn(monkeypatch, conn, proc, calls)
+        info = make_info()
+
+        asyncio.run(AcpHost(cfg, EventStore()).run(info))
+
+        text = (tmp_path / "trace" / info.id / "harness.log").read_text(
+            encoding="utf-8"
+        )
+        assert "supersecret" not in text
+        assert "token=<redacted>" in text
 
 
 class TestCloneRootWorkspace:
@@ -408,8 +650,8 @@ class TestCloneRootWorkspace:
         result = asyncio.run(AcpHost(cfg, EventStore()).run(make_info()))
 
         assert result.workspace == str(clones / "repo")
-        # spawn --cwd and new_session both point at the checkout
-        assert calls[0][2][2] == str(clones / "repo")
+        # spawn cwd and new_session both point at the checkout
+        assert calls[0][3] == str(clones / "repo")
         assert conn.calls[1][1] == str(clones / "repo")
 
     def test_owner_prefix_stripped_from_repo_name(self, tmp_path, monkeypatch) -> None:
@@ -421,7 +663,7 @@ class TestCloneRootWorkspace:
 
         asyncio.run(AcpHost(cfg, EventStore()).run(make_info(repo="intel-agency/repo")))
 
-        assert calls[0][2][2] == str(clones / "repo")
+        assert calls[0][3] == str(clones / "repo")
 
     def test_traversal_repo_name_fails_closed(self, tmp_path, monkeypatch) -> None:
         # The name segment is validated before path composition: a
@@ -544,12 +786,123 @@ class TestRunFailures:
         # context manager's clean-exit simulation.
         assert proc.killed is True
 
+    def test_idle_watchdog_kills_silent_run(self, tmp_path, monkeypatch) -> None:
+        # A run that goes silent (no session updates) dies on the idle
+        # limit with a precise reason — even with the hard ceiling off.
+        store = EventStore()
+        cfg = make_settings(tmp_path, acp_idle_timeout=0.1, acp_prompt_timeout=0.0)
+        conn = FakeConn(delay=5.0)  # silent hang: delay, no heartbeats
+        proc = FakeProc()
+        install_spawn(monkeypatch, conn, proc, [])
+
+        with pytest.raises(AcpHostError, match="idle watchdog"):
+            asyncio.run(AcpHost(cfg, store).run(make_info()))
+
+        finished = events_of_type(store, "agent_finished")[0]["data"]
+        assert finished["ok"] is False
+        assert "no session updates" in finished["error"]
+        assert proc.killed is True
+
+    def test_idle_watchdog_spares_live_run(self, tmp_path, monkeypatch) -> None:
+        # Owner decision 2026-10-17: a live session is never killed on
+        # elapsed time. Total runtime (0.6s) far exceeds the idle limit
+        # (0.1s), but heartbeats arrive every 0.02s — the run completes.
+        store = EventStore()
+        cfg = make_settings(tmp_path, acp_idle_timeout=0.1, acp_prompt_timeout=0.0)
+        conn = FakeConn(delay=0.6, update_interval=0.02)
+        install_spawn(monkeypatch, conn, FakeProc(), [])
+
+        result = asyncio.run(AcpHost(cfg, store).run(make_info()))
+
+        assert result.session_id == "sess-1"
+        assert result.stop_reason == "end_turn"
+
+    def test_hard_ceiling_binds_when_set(self, tmp_path, monkeypatch) -> None:
+        # The ceiling is opt-in: with it set, even a heartbeating run dies
+        # at the ceiling with the ceiling reason.
+        store = EventStore()
+        cfg = make_settings(tmp_path, acp_idle_timeout=0.1, acp_prompt_timeout=0.3)
+        conn = FakeConn(delay=5.0, update_interval=0.02)  # alive but over
+        proc = FakeProc()
+        install_spawn(monkeypatch, conn, proc, [])
+
+        with pytest.raises(AcpHostError, match="hard ceiling"):
+            asyncio.run(AcpHost(cfg, store).run(make_info()))
+
+        finished = events_of_type(store, "agent_finished")[0]["data"]
+        assert finished["ok"] is False
+        assert "ACP_PROMPT_TIMEOUT" in finished["error"]
+        assert proc.killed is True
+
+    def test_idle_budget_starts_at_prompt_not_handshake(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Spawn + initialize + new_session must not debit the idle budget
+        # (PR #50 review): a handshake slower than the idle limit followed
+        # by a heartbeating prompt completes instead of dying on the
+        # watchdog's first poll.
+        store = EventStore()
+        cfg = make_settings(tmp_path, acp_idle_timeout=0.15, acp_prompt_timeout=0.0)
+        conn = FakeConn(delay=0.6, update_interval=0.02, init_delay=0.3)
+        install_spawn(monkeypatch, conn, FakeProc(), [])
+
+        result = asyncio.run(AcpHost(cfg, store).run(make_info()))
+
+        assert result.session_id == "sess-1"
+        assert result.stop_reason == "end_turn"
+
+    def test_harness_stderr_keeps_silent_run_alive(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Secondary liveness signal (PR #50 review): harness stderr lines
+        # reset the idle clock, so a run with NO session updates at all —
+        # but a harness still logging — survives past the idle limit (the
+        # old orchestrator-service watchdog's stderr-growth signal,
+        # ported).
+        store = EventStore()
+        cfg = make_settings(tmp_path, acp_idle_timeout=0.1, acp_prompt_timeout=0.0)
+        conn = FakeConn(delay=0.6)  # silent hang: no update_interval
+        proc = FakeProc(stderr_stream=TimedStderr("model call\n" * 60, 0.02))
+        install_spawn(monkeypatch, conn, proc, [])
+
+        result = asyncio.run(AcpHost(cfg, store).run(make_info()))
+
+        assert result.session_id == "sess-1"
+        assert result.stop_reason == "end_turn"
+
+    def test_prompt_cancelled_fails_with_no_verdict_error(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # The SDK cancelling the prompt coroutine (connection loss) leaves
+        # the watchdog pending: the run fails with the honest no-verdict
+        # error instead of InvalidStateError off the pending task's
+        # unset exception (PR #50 review).
+        store = EventStore()
+        cfg = make_settings(tmp_path, acp_idle_timeout=0.1, acp_prompt_timeout=0.0)
+        conn = FakeConn(prompt_exc=asyncio.CancelledError())
+        install_spawn(monkeypatch, conn, FakeProc(), [])
+
+        with pytest.raises(
+            AcpHostError, match="prompt ended cancelled with no verdict"
+        ):
+            asyncio.run(AcpHost(cfg, store).run(make_info()))
+
+        finished = events_of_type(store, "agent_finished")[0]["data"]
+        assert finished["ok"] is False
+        assert "no verdict" in finished["error"]
+
     def test_spawn_failure_raises_acp_host_error(self, tmp_path, monkeypatch) -> None:
         store = EventStore()
         cfg = make_settings(tmp_path)
 
         @contextlib.asynccontextmanager
-        async def failing_spawn(client: object, command: str, *args: str):
+        async def failing_spawn(
+            client: object,
+            command: str,
+            *args: str,
+            cwd: str | None = None,
+            env: dict | None = None,
+        ):
             raise AcpHostError("cannot spawn")
             yield  # pragma: no cover
 
@@ -580,6 +933,87 @@ class TestRunFailures:
         finished = events_of_type(store, "agent_finished")[0]["data"]
         assert finished["session_id"] is None
         assert finished["ok"] is False
+
+
+class TestResolvePromptRace:
+    """_resolve_prompt_race (PR #50 review): the both-done prompt/watchdog
+    race resolves to one honest outcome, with both tasks' outcomes read
+    guarded — never InvalidStateError off a pending task."""
+
+    def test_prompt_result_wins_with_watchdog_pending(self) -> None:
+        async def scenario() -> None:
+            outcome = SimpleNamespace(stop_reason="end_turn")
+            prompt_task = asyncio.ensure_future(_settle(outcome))
+            watchdog_task = asyncio.ensure_future(_settle(delay=60))
+            await asyncio.sleep(0)  # prompt settles; watchdog mid-sleep
+            assert _resolve_prompt_race(prompt_task, watchdog_task) is outcome
+            watchdog_task.cancel()
+            await asyncio.gather(watchdog_task, return_exceptions=True)
+
+        asyncio.run(scenario())
+
+    def test_prompt_exception_raises_with_watchdog_pending(self) -> None:
+        async def scenario() -> None:
+            prompt_task = asyncio.ensure_future(_settle(exc=RuntimeError("boom")))
+            watchdog_task = asyncio.ensure_future(_settle(delay=60))
+            await asyncio.sleep(0)
+            with pytest.raises(RuntimeError, match="boom"):
+                _resolve_prompt_race(prompt_task, watchdog_task)
+            watchdog_task.cancel()
+            await asyncio.gather(watchdog_task, return_exceptions=True)
+
+        asyncio.run(scenario())
+
+    def test_watchdog_kill_reason_wins_when_both_done(self) -> None:
+        async def scenario() -> None:
+            # Correlated race: the hung stream errors out right as the
+            # idle deadline expires — the kill reason is the diagnosis,
+            # not the follow-on channel error.
+            prompt_task = asyncio.ensure_future(
+                _settle(exc=RuntimeError("channel broke"))
+            )
+            watchdog_task = asyncio.ensure_future(
+                _settle(exc=SessionWatchdogTimeout("idle watchdog killed the run"))
+            )
+            await asyncio.sleep(0)
+            with pytest.raises(SessionWatchdogTimeout, match="idle watchdog killed"):
+                _resolve_prompt_race(prompt_task, watchdog_task)
+            # The sibling's outcome stays readable after resolution —
+            # run()'s finally retrieves it exactly this way.
+            assert isinstance(prompt_task.exception(), RuntimeError)
+
+        asyncio.run(scenario())
+
+    def test_finished_prompt_beats_same_turn_ceiling(self) -> None:
+        async def scenario() -> None:
+            # Ceiling verdict landing in the same turn the prompt answered:
+            # a run that returned a result succeeded.
+            outcome = SimpleNamespace(stop_reason="end_turn")
+            prompt_task = asyncio.ensure_future(_settle(outcome))
+            watchdog_task = asyncio.ensure_future(
+                _settle(exc=SessionWatchdogTimeout("hard ceiling"))
+            )
+            await asyncio.sleep(0)
+            assert _resolve_prompt_race(prompt_task, watchdog_task) is outcome
+            watchdog_task.exception()  # consume the sibling's verdict
+
+        asyncio.run(scenario())
+
+    def test_cancelled_prompt_pending_watchdog_reports_no_verdict(self) -> None:
+        async def scenario() -> None:
+            prompt_task = asyncio.ensure_future(_settle(delay=60))
+            watchdog_task = asyncio.ensure_future(_settle(delay=60))
+            await asyncio.sleep(0)
+            prompt_task.cancel()
+            await asyncio.gather(prompt_task, return_exceptions=True)
+            with pytest.raises(
+                AcpHostError, match="prompt ended cancelled with no verdict"
+            ):
+                _resolve_prompt_race(prompt_task, watchdog_task)
+            watchdog_task.cancel()
+            await asyncio.gather(watchdog_task, return_exceptions=True)
+
+        asyncio.run(scenario())
 
 
 class TestResolveOpencodeBin:
@@ -627,7 +1061,7 @@ class TestHostClientMapping:
         store = EventStore()
         return HostClient(make_settings(Path("/tmp")), store, run_id="run-1"), store
 
-    def test_message_chunk_without_text_ignored(self) -> None:
+    def test_chunk_without_text_passes_through_as_agent_update(self) -> None:
         client, store = self.make_client()
 
         async def main() -> None:
@@ -637,17 +1071,198 @@ class TestHostClientMapping:
             )
 
         asyncio.run(main())
-        assert store.recent() == []
+        data = events_of_type(store, "agent_update")[0]["data"]
+        assert data["kind"] == "agent_message_chunk"  # never silently dropped
 
-    def test_unmapped_kinds_ignored(self) -> None:
+    def test_user_and_thought_chunks_emit_with_text(self) -> None:
         client, store = self.make_client()
 
         async def main() -> None:
-            for kind in ("plan", "available_commands_update", "current_mode_update"):
-                await client.session_update("s", SimpleNamespace(session_update=kind))
+            await client.session_update(
+                "s",
+                UserMessageChunk(
+                    session_update="user_message_chunk",
+                    content=TextContentBlock(type="text", text="the prompt"),
+                ),
+            )
+            await client.session_update(
+                "s",
+                AgentThoughtChunk(
+                    session_update="agent_thought_chunk",
+                    content=TextContentBlock(type="text", text="reasoning"),
+                ),
+            )
 
         asyncio.run(main())
-        assert store.recent() == []
+        user = events_of_type(store, "user_message_chunk")[0]["data"]
+        thought = events_of_type(store, "agent_thought_chunk")[0]["data"]
+        assert user == {"run_id": "run-1", "text": "the prompt"}
+        assert thought == {"run_id": "run-1", "text": "reasoning"}
+
+    def test_plan_kinds_emit_wire_shaped_payloads(self) -> None:
+        client, store = self.make_client()
+        entry = PlanEntry(content="write plan", priority="high", status="pending")
+
+        async def main() -> None:
+            await client.session_update(
+                "s", AgentPlanUpdate(session_update="plan", entries=[entry])
+            )
+            await client.session_update(
+                "s",
+                AgentPlanContentUpdate(
+                    session_update="plan_update",
+                    plan=PlanUpdateItems(
+                        plan_id="p-1", entries=[entry], type="items"
+                    ),
+                ),
+            )
+            await client.session_update(
+                "s",
+                AgentPlanRemovedUpdate(
+                    session_update="plan_removed", plan_id="p-1"
+                ),
+            )
+
+        asyncio.run(main())
+        plan = events_of_type(store, "agent_plan")[0]["data"]
+        update = events_of_type(store, "agent_plan_update")[0]["data"]
+        removed = events_of_type(store, "agent_plan_removed")[0]["data"]
+        assert plan["entries"] == [
+            {
+                "content": "write plan",
+                "priority": "high",
+                "status": "pending",
+                "_meta": None,
+            }
+        ]
+        assert update["plan"]["planId"] == "p-1"  # wire field names, one-to-one
+        assert update["plan"]["type"] == "items"
+        assert removed["plan_id"] == "p-1"
+
+    def test_commands_mode_session_info_config_emit(self) -> None:
+        client, store = self.make_client()
+
+        async def main() -> None:
+            await client.session_update(
+                "s",
+                AvailableCommandsUpdate(
+                    session_update="available_commands_update",
+                    available_commands=[
+                        AvailableCommand(name="research_codebase", description="d")
+                    ],
+                ),
+            )
+            await client.session_update(
+                "s",
+                CurrentModeUpdate(
+                    session_update="current_mode_update", current_mode_id="build"
+                ),
+            )
+            await client.session_update(
+                "s",
+                SessionInfoUpdate(
+                    session_update="session_info_update",
+                    title="t1",
+                    updated_at="2026-10-15T00:00:00Z",
+                ),
+            )
+            await client.session_update(
+                "s",
+                ConfigOptionUpdate(
+                    session_update="config_option_update",
+                    config_options=[
+                        SessionConfigOptionBoolean(
+                            id="opt-1",
+                            name="Opt",
+                            value=True,
+                            currentValue=True,
+                            type="boolean",
+                        )
+                    ],
+                ),
+            )
+
+        asyncio.run(main())
+        commands = events_of_type(store, "agent_commands_update")[0]["data"]
+        mode = events_of_type(store, "agent_mode_update")[0]["data"]
+        info = events_of_type(store, "agent_session_info")[0]["data"]
+        config = events_of_type(store, "agent_config_update")[0]["data"]
+        assert commands["commands"][0]["name"] == "research_codebase"
+        assert mode["mode_id"] == "build"
+        assert info == {
+            "run_id": "run-1",
+            "title": "t1",
+            "updated_at": "2026-10-15T00:00:00Z",
+        }
+        assert config["options"][0]["id"] == "opt-1"
+
+    def test_unknown_kind_passes_through_as_agent_update(self) -> None:
+        client, store = self.make_client()
+
+        async def main() -> None:
+            await client.session_update(
+                "s", SimpleNamespace(session_update="future_kind", custom=1)
+            )
+
+        asyncio.run(main())
+        data = events_of_type(store, "agent_update")[0]["data"]
+        assert data["run_id"] == "run-1"
+        assert data["kind"] == "future_kind"
+        assert "payload" in data  # never dropped, always inspectable
+
+    _EXPECTED_EVENTS = {
+        "user_message_chunk": "user_message_chunk",
+        "agent_message_chunk": "agent_message_chunk",
+        "agent_thought_chunk": "agent_thought_chunk",
+        "tool_call": "agent_tool_call",
+        "tool_call_update": "agent_tool_call",
+        "usage_update": "agent_usage",
+        "plan": "agent_plan",
+        "plan_update": "agent_plan_update",
+        "plan_removed": "agent_plan_removed",
+        "available_commands_update": "agent_commands_update",
+        "current_mode_update": "agent_mode_update",
+        "session_info_update": "agent_session_info",
+        "config_option_update": "agent_config_update",
+    }
+
+    def test_every_sdk_kind_maps_to_a_typed_event(self) -> None:
+        client, store = self.make_client()
+
+        async def main() -> None:
+            for kind in self._EXPECTED_EVENTS:
+                update: Any = SimpleNamespace(session_update=kind)
+                if "chunk" in kind:  # chunk kinds carry their text on .content
+                    update.content = SimpleNamespace(text="x")
+                await client.session_update("s", update)
+
+        asyncio.run(main())
+        emitted = {item["type"] for item in store.recent()}
+        for kind, event in self._EXPECTED_EVENTS.items():
+            assert event in emitted, f"{kind} did not emit {event}"
+        assert "agent_update" not in emitted  # nothing fell through
+
+    def test_mapping_covers_the_pinned_sdk(self) -> None:
+        """ALL-traces drift guard: when the pinned SDK grows a new
+        ``session_update`` discriminator, this fails until the mapping is
+        taught (the new kind would otherwise arrive as ``agent_update``)."""
+        import typing
+
+        from acp import schema
+
+        kinds: set[str] = set()
+        for name in dir(schema):
+            cls = getattr(schema, name)
+            if not isinstance(cls, type):
+                continue
+            try:
+                hints = typing.get_type_hints(cls)
+            except Exception:
+                continue
+            for literal in typing.get_args(hints.get("session_update") or ()):
+                if isinstance(literal, str):
+                    kinds.add(literal)
+        assert kinds == set(self._EXPECTED_EVENTS)
 
     def test_request_permission_applies_policy_and_emits(self) -> None:
         client, store = self.make_client()

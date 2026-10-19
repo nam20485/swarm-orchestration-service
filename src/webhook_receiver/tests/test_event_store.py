@@ -4,7 +4,18 @@ from __future__ import annotations
 
 import time
 
+from webhook_receiver import event_store
 from webhook_receiver.event_store import EventStore
+
+
+class _FakeClock:
+    """Stand-in for the ``time`` module with a settable clock."""
+
+    def __init__(self, now: float) -> None:
+        self.now = now
+
+    def time(self) -> float:
+        return self.now
 
 
 class TestEmitAndRecent:
@@ -16,14 +27,32 @@ class TestEmitAndRecent:
         assert events[0]["type"] == "webhook_received"
         assert events[0]["data"]["delivery_id"] == "d-1"
         assert events[0]["data"]["repo"] == "o/r"
-        assert events[0]["id"] == 1
+        epoch, boot, seq = events[0]["id"].split("-")
+        assert epoch.isdigit() and len(boot) == 8 and seq == "1"
 
     def test_ids_increase_monotonically(self) -> None:
         store = EventStore()
         store.emit("a")
         store.emit("b")
         ids = [e["id"] for e in store.recent()]
-        assert ids == [1, 2]
+        assert len(set(ids)) == 2
+        (boot_a, _, seq_a), (boot_b, _, seq_b) = (i.rpartition("-") for i in ids)
+        assert boot_a == boot_b  # one boot prefix per store
+        assert int(seq_b) == int(seq_a) + 1
+
+    def test_ids_never_collide_across_a_restart(self, monkeypatch) -> None:
+        # A UI tab left open across a redeploy dedupes by seen ids; the new
+        # process must never reissue an id the old one already used — even
+        # when the restart lands in the same clock second (a crash-looping
+        # container), which only the per-boot uuid token can cover.
+        clock = _FakeClock(1_700_000_000.0)
+        monkeypatch.setattr(event_store, "time", clock)
+        before = EventStore()
+        before.emit("a")
+        after = EventStore()  # zero clock jump: the crash-loop corner
+        after.emit("a")
+        assert before.recent()[0]["id"] != after.recent()[0]["id"]
+        assert before.recent()[0]["id"].split("-")[0] == after.recent()[0]["id"].split("-")[0]
 
     def test_recent_limit_returns_last_n(self) -> None:
         store = EventStore()

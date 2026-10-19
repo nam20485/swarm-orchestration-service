@@ -29,9 +29,9 @@ POST /webhooks/github ---- transport gate: only issues.labeled by a
 PromptInfo queue ---------- typed asyncio.Queue envelope, delivery-id dedup,
   |                        one FIFO consumer
   v
-ACP host ------------------ one cold `opencode acp --cwd <workspace>` session
-  |                        per envelope; fail-closed permission policy;
-  |                        zero host-side model pins
+ACP host ------------------ one cold `opencode acp` session per envelope
+  |                        (workspace as process cwd); fail-closed
+  |                        permission policy; zero host-side model pins
   v
 SwarmSandbox bridge ------- optional (SANDBOX_ENABLED): the sandbox provisions
                            the harness clone that becomes the session cwd
@@ -78,15 +78,22 @@ Every knob is an environment variable parsed in
 | `WEBHOOK_MAX_BODY_BYTES` | `26214400` | larger webhook bodies are rejected with 413 |
 | `WEBHOOK_LOG_LEVEL` | `info` | uvicorn and logging level |
 | `WEBHOOK_EVENTS_KEEPALIVE` | `15` | idle seconds before the SSE stream emits a keepalive comment (must be positive) |
+| `WEBHOOK_EVENTS_MAXLEN` | `1000` | event ring-buffer capacity — the `GET /events` replay window (every ACP `session/update` kind is an event) |
+| `WEBHOOK_EVENTS_LOG_ENABLED` | `true` | durable event tail — JSONL under `ACP_TRACE_ROOT` (`<run_id>/events.jsonl` + rotated global tail), read back via `GET /runs`; independent of `ACP_TRACE_ENABLED` |
 | `ACP_ENABLED` | `true` | drive opencode over ACP per envelope; `false` keeps the queue-consumer placeholder (no agent sessions) |
 | `ACP_OPENCODE_BIN` | PATH, then `~/.opencode/bin/opencode` | opencode binary location |
 | `ACP_WORKSPACE_ROOT` | `/tmp/swarm-acp-workspaces` | root for per-run session workspaces (the repo itself is never used) |
 | `ACP_CLONE_ROOT` | *(empty)* | when set, the session cwd becomes `<root>/<repo name>` — the launcher-minted checkout of the envelope's repo — instead of a scratch dir; a missing checkout fails the envelope; mutually exclusive with `SANDBOX_ENABLED` (the host refuses to start with both) |
 | `ACP_STEP_TIMEOUT` | `30` | seconds per protocol step (initialize, session open) |
-| `ACP_PROMPT_TIMEOUT` | `600` | seconds per prompt (one cold session per envelope) |
+| `ACP_IDLE_TIMEOUT` | `300` | idle watchdog: a run is killed only after this many seconds with **no** session updates — any update resets the clock; a live session is never killed on elapsed time |
+| `ACP_PROMPT_TIMEOUT` | `0` | optional hard ceiling on the whole prompt in seconds; `0` (default) disables it |
 | `ACP_DEFAULT_PERMISSION` | `reject` | action for unclassified permission requests: `reject` (headless-safe) or `allow_once` |
 | `ACP_DENY_PATTERNS` | *(empty)* | comma-separated regexes (case-insensitive) that always reject a permission request; validated at boot |
 | `ACP_DENIED_TOOLS` | *(empty)* | tools denied pre-prompt via the workspace `opencode.json` permission config (bare workspaces only — never written into an `ACP_CLONE_ROOT` checkout) |
+| `ACP_TRACE_ENABLED` | `true` | spawn opencode with `--print-logs --log-level` so its own log stream reaches the host (`[harness]` lines at INFO); `false` drains stderr silently at DEBUG |
+| `ACP_HARNESS_LOG_LEVEL` | `info` | one of opencode ≥ 2.0's `--log-level` choices (`all`, `trace`, `debug`, `info`, `warn`, `warning`, `error`, `fatal`, `none` — lowercase only); legacy uppercase values normalize at boot |
+| `ACP_TRACE_ROOT` | *(empty)* | per-run trace artifact root for `harness.log` + `manifest.json`; empty = `logs/runs` relative to the working directory (gitignored) |
+| `ACP_TRACE_KEEP_RUNS` | `50` | newest-N run directories kept, pruned when a run opens |
 | `SANDBOX_ENABLED` | `false` | provision session workspaces through the SwarmSandbox API; mutually exclusive with `ACP_CLONE_ROOT` |
 | `SANDBOX_API_URL` | *(required when enabled)* | SwarmSandbox API base URL; validated at boot |
 | `SANDBOX_BRANCH` | `development` | branch the sandbox clones into the workspace |

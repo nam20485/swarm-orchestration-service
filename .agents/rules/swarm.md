@@ -8,7 +8,7 @@ The primary session acts as the orchestrator and spawns worker subagents through
 
 ## Locations
 
-- Agent definitions are real ZCode-format files in `.zcode/agents/` — no symlinks, no canonical copies elsewhere. ZCode-specific definitions are not readable by other harnesses; supporting another harness means generating native definitions for it (deferred until a second harness is chosen).
+- Agent definitions are real ZCode-format files in `.zcode/agents/` — no symlinks, no canonical copies elsewhere. ZCode-specific definitions are not readable by other harnesses; supporting another harness means generating native definitions for it. The second harness is chosen — opencode — and its native definitions live in `.opencode/agents/swarm-*.md` (see the roster-mirror rule below).
 - The skill lives at `.agents/skills/swarm/` (repo convention; workspace discovery from `.agents/skills/` is empirically confirmed by this repo's existing skills).
 - Run state lives under `.swarm/<run-id>/` (`goal.md`, `state.json`, `field-guide.md`) and is gitignored — local-only, never committed.
 - Shared worker instructions live in [`.agents/rules/swarm-workers.md`](swarm-workers.md) — the workers' conventions channel (see below).
@@ -24,11 +24,11 @@ The primary session acts as the orchestrator and spawns worker subagents through
 | `swarm-reviewer` | Read, Grep, Glob, Bash | diff / quality review |
 | `swarm-analyst` | Read, Grep, Glob, Bash | post-wave telemetry: parses subagent session logs, appends metrics to `docs/swarm-metrics.md`, reports ranked anomalies |
 
-No hard type cap (the old ≤5 rule was dropped by user direction, 2026-09-06): every type must be narrowly single-purpose with the smallest sufficient toolset — the narrower the definition, the more focused the worker. All definitions set `injectAgentsMd: false` — workers get their conventions from `.agents/rules/swarm-workers.md` plus the task's Constraints element, not from the primary session's AGENTS.md (whose mandates reference tools they lack). All worker definitions set `model: GLM-5.3-Flash` + `thoughtLevel: off` — extended thinking at the worker level was measured as a cost driver (32K thinking budget + `effort: max` on every request); reasoning belongs at the orchestrator level, worker tasks must be straightforward directions.
+No hard type cap (the old ≤5 rule was dropped by user direction, 2026-09-06): every type must be narrowly single-purpose with the smallest sufficient toolset — the narrower the definition, the more focused the worker. All worker definitions set `injectAgentsMd: false` — workers get their conventions from `.agents/rules/swarm-workers.md` plus the task's Constraints element, not from the primary session's AGENTS.md (whose mandates reference tools they lack). The king (`swarm-orchestrator`) is the exception with `injectAgentsMd: true`. All worker definitions set `model: GLM-5.3-Flash` + `thoughtLevel: low` — GLM-5.3 exposes no off level (probe 2026-10-16), and thinking above `low` at the worker level was measured as a cost driver (32K thinking budget + `effort: max` on every request); thinking stays heaviest at the orchestrator level, worker tasks must be straightforward directions. The roster is mirrored on opencode as `.opencode/agents/swarm-*.md` (native opencode frontmatter; `default_agent: swarm-orchestrator` — the king, who also runs dispatches himself on that harness) — keep the two sets mirrored in rules and roster, each in its harness's format.
 
 ## Post-wave analysis
 
-After each wave's workers report, spawn one `swarm-analyst` for the whole wave (never one per agent — cross-referencing sessions is the point). It parses `~/.zcode/cli/agents/<sess>/<agent>/metadata.json` + `~/.zcode/cli/rollout/model-io-sess_subagent_<agent>.jsonl`, appends metrics rows and anomalies to [`docs/swarm-metrics.md`](../../docs/swarm-metrics.md) (the only file it writes), and returns ranked anomalies with one-line fixes. The orchestrator reads that report before composing the next wave — anomalies feed decomposition (contention → re-split by build unit; duplicate discovery → inject excerpts; wasted calls → narrow toolset or tighten Done-when).
+After each wave's workers report, spawn one `swarm-analyst` for the whole wave (never one per agent — cross-referencing sessions is the point). It parses `~/.zcode/cli/agents/<sess>/<agent>/metadata.json` + `~/.zcode/cli/rollout/model-io-sess_subagent_<agent>.jsonl`, appends metrics rows and anomalies to `docs/swarm-metrics.md` (gitignored run artifact, created with a header if missing; the only file it writes), and returns ranked anomalies with one-line fixes. The orchestrator reads that report before composing the next wave — anomalies feed decomposition (contention → re-split by build unit; duplicate discovery → inject excerpts; wasted calls → narrow toolset or tighten Done-when).
 
 ## MCP servers
 
@@ -52,3 +52,5 @@ The Z.AI servers (`web-reader`, `web-search-prime`, `zread`) are granted to `swa
 ## Skill self-containment exception
 
 The swarm skill's orchestrator protocol intentionally lives at the agent-definition discovery path `.zcode/agents/swarm-orchestrator.md`; this is the documented exception to skill self-containment (`.agents/rules/skills.md`) — agent definitions must live at their discovery path, and duplicating the protocol in the skill would drift.
+
+<!-- canary: azure-magpie-12 -->

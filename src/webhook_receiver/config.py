@@ -26,6 +26,22 @@ def _env_list(name: str) -> tuple[str, ...]:
     return tuple(item.strip() for item in raw.split(",") if item.strip())
 
 
+# ``opencode --log-level`` choices (opencode >= 2.0, lowercase only — an
+# uppercase value is rejected by the CLI) — the harness trace tap
+# (docs/plans/harness-trace-parity.md D1).
+_HARNESS_LOG_LEVELS = (
+    "all",
+    "trace",
+    "debug",
+    "info",
+    "warn",
+    "warning",
+    "error",
+    "fatal",
+    "none",
+)
+
+
 @dataclass(frozen=True)
 class Settings:
     """Listener settings (trimmed port of the old orchestrator-service config).
@@ -45,6 +61,16 @@ class Settings:
     # Idle seconds before GET /events emits a keepalive comment; must also
     # stay below any proxy read timeout in front of the listener.
     events_keepalive: float = 15.0
+    # Ring-buffer capacity of the event store. Every session/update kind is
+    # an event now (webui plan W0), so a busy run churns the ring with
+    # chunk/plan events; raise this if replay windows feel short. The W1
+    # per-run JSONL log is the durable record beyond the ring.
+    events_maxlen: int = 1000
+    # Durable event tail (webui plan W1): append every event as JSONL under
+    # the trace root (<ACP_TRACE_ROOT>/<run_id>/events.jsonl plus a rotated
+    # root-level tail for pre-envelope webhook events). Own flag on purpose
+    # — independent of ACP_TRACE_ENABLED; retention rides ACP_TRACE_KEEP_RUNS.
+    events_log_enabled: bool = True
     # --- ACP host (Phase 2) ---
     acp_enabled: bool = True
     # Empty → resolve via PATH, then ~/.opencode/bin/opencode.
@@ -58,7 +84,12 @@ class Settings:
     # checkout — seeded config or not — never gets a deny file.
     acp_clone_root: str = ""
     acp_step_timeout: float = 30.0  # per protocol step (initialize, new_session)
-    acp_prompt_timeout: float = 600.0  # per prompt (one cold session per envelope)
+    # Optional hard ceiling on the whole prompt; 0 = disabled (owner
+    # decision 2026-10-17: a live session is never killed on elapsed time).
+    acp_prompt_timeout: float = 0.0
+    # Idle watchdog: kill a run after this long with NO session updates —
+    # any update resets the clock (protocol events are the heartbeat).
+    acp_idle_timeout: float = 300.0
     # Unclassified permission requests: "reject" (default, headless-safe) or
     # "allow_once". Read-only tool kinds are always allowed; the deny patterns
     # below always reject.
@@ -71,6 +102,22 @@ class Settings:
     # ``permission`` config (belt-and-braces; opencode removes the tool
     # entirely — spikes/acp/README.md deny-config finding).
     acp_denied_tools: tuple[str, ...] = ()
+    # --- Harness trace (docs/plans/harness-trace-parity.md D1/D7) ---
+    # Spawn the agent with ``--print-logs --log-level <acp_harness_log_level>``
+    # so its own log stream (model calls, loop steps, context/skill loading)
+    # reaches the host on stderr — stdout stays the JSON-RPC channel — and
+    # surface it at INFO with a ``[harness]`` label. False drains stderr
+    # silently at DEBUG; no other behaviour changes.
+    acp_trace_enabled: bool = True
+    # One of ``opencode --log-level``'s choices; validated at boot.
+    acp_harness_log_level: str = "info"
+    # Per-run artifact root: ``<root>/<run_id>/{harness.log,manifest.json}``.
+    # Empty → ``logs/runs`` relative to the service's working directory
+    # (gitignored). A relative path stays relative — the unit pins
+    # WorkingDirectory to the repo root.
+    acp_trace_root: str = ""
+    # Retention: newest N run directories kept, pruned when a run opens.
+    acp_trace_keep_runs: int = 50
     # --- SwarmSandbox bridge (Phase 4, plan §5 Decision 5) ---
     # Off by default: the Phase 2 plain scratch-dir workspace is kept, so CI
     # and dockerless local dev are unaffected. When enabled, the session cwd
@@ -130,6 +177,27 @@ class Settings:
         if events_keepalive <= 0:
             raise ValueError("WEBHOOK_EVENTS_KEEPALIVE must be a positive number.")
 
+        events_maxlen = int(os.environ.get("WEBHOOK_EVENTS_MAXLEN", "1000"))
+        if events_maxlen < 1:
+            raise ValueError("WEBHOOK_EVENTS_MAXLEN must be at least 1.")
+
+        harness_log_level = (
+            os.environ.get("ACP_HARNESS_LOG_LEVEL", "info").strip().lower() or "info"
+        )
+        if harness_log_level not in _HARNESS_LOG_LEVELS:
+            raise ValueError(
+                "ACP_HARNESS_LOG_LEVEL must be one of: "
+                + ", ".join(_HARNESS_LOG_LEVELS)
+            )
+
+        trace_keep_runs = int(os.environ.get("ACP_TRACE_KEEP_RUNS", "50"))
+        if trace_keep_runs < 1:
+            raise ValueError("ACP_TRACE_KEEP_RUNS must be at least 1.")
+
+        idle_timeout = float(os.environ.get("ACP_IDLE_TIMEOUT", "300"))
+        if idle_timeout <= 0:
+            raise ValueError("ACP_IDLE_TIMEOUT must be a positive number.")
+
         return cls(
             host=os.environ.get("WEBHOOK_HOST", "0.0.0.0"),
             port=int(os.environ.get("WEBHOOK_PORT", "8080")),
@@ -139,15 +207,22 @@ class Settings:
             ),
             log_level=os.environ.get("WEBHOOK_LOG_LEVEL", "info").lower(),
             events_keepalive=events_keepalive,
+            events_maxlen=events_maxlen,
+            events_log_enabled=_env_bool("WEBHOOK_EVENTS_LOG_ENABLED", True),
             acp_enabled=_env_bool("ACP_ENABLED", True),
             acp_opencode_bin=os.environ.get("ACP_OPENCODE_BIN", "").strip(),
             acp_workspace_root=os.environ.get("ACP_WORKSPACE_ROOT", "").strip(),
             acp_clone_root=acp_clone_root,
             acp_step_timeout=float(os.environ.get("ACP_STEP_TIMEOUT", "30")),
-            acp_prompt_timeout=float(os.environ.get("ACP_PROMPT_TIMEOUT", "600")),
+            acp_prompt_timeout=float(os.environ.get("ACP_PROMPT_TIMEOUT", "0")),
+            acp_idle_timeout=idle_timeout,
             acp_default_permission=default_permission,
             acp_deny_patterns=deny_patterns,
             acp_denied_tools=_env_list("ACP_DENIED_TOOLS"),
+            acp_trace_enabled=_env_bool("ACP_TRACE_ENABLED", True),
+            acp_harness_log_level=harness_log_level,
+            acp_trace_root=os.environ.get("ACP_TRACE_ROOT", "").strip(),
+            acp_trace_keep_runs=trace_keep_runs,
             sandbox_enabled=sandbox_enabled,
             sandbox_api_url=sandbox_api_url,
             sandbox_branch=os.environ.get("SANDBOX_BRANCH", "development").strip()

@@ -144,9 +144,10 @@ class FakeProc:
 
 
 class FakeConn:
-    def __init__(self, prompt_delay: float = 0.0) -> None:
+    def __init__(self, prompt_delay: float = 0.0, prompt_exc: Exception | None = None) -> None:
         self.client: object | None = None
         self.prompt_delay = prompt_delay
+        self.prompt_exc = prompt_exc
         self.new_session_kwargs: dict = {}
 
     async def initialize(self, protocol_version: int, **_: object):
@@ -160,6 +161,8 @@ class FakeConn:
     async def prompt(self, *a: object, **k: object):
         if self.prompt_delay:
             await asyncio.sleep(self.prompt_delay)
+        if self.prompt_exc is not None:
+            raise self.prompt_exc
         return SimpleNamespace(stop_reason="end_turn")
 
 
@@ -167,7 +170,13 @@ def install_spawn(
     monkeypatch: pytest.MonkeyPatch, conn: FakeConn, proc: FakeProc
 ) -> None:
     @contextlib.asynccontextmanager
-    async def fake_spawn(client: object, command: str, *args: str):
+    async def fake_spawn(
+        client: object,
+        command: str,
+        *args: str,
+        cwd: str | None = None,
+        env: dict | None = None,
+    ):
         conn.client = client
         try:
             yield conn, proc
@@ -190,12 +199,21 @@ class TestSettingsParsing:
         assert settings.sandbox_docker_bin == "docker"
 
     def test_from_env_parses_all_knobs(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Sandbox mode is on below; clear the clone-root knob so an ambient
+        # ACP_CLONE_ROOT can't trip the boot exclusivity check and fail this
+        # test for a reason it doesn't assert (mirror of test_acp_env_overrides).
+        monkeypatch.delenv("ACP_CLONE_ROOT", raising=False)
         monkeypatch.setenv("OS_WEBHOOK_SECRET", "s")
         monkeypatch.setenv("SANDBOX_ENABLED", "true")
         monkeypatch.setenv("SANDBOX_API_URL", "http://sbx:5000/")
         monkeypatch.setenv("SANDBOX_BRANCH", "dev/phase4")
         monkeypatch.setenv("SANDBOX_READY_TIMEOUT", "42")
         monkeypatch.setenv("SANDBOX_DOCKER_BIN", "/usr/bin/docker")
+        # SANDBOX_ENABLED is set here; clear the clone root so an ambient
+        # ACP_CLONE_ROOT (the host-run service exports one) can't trip the
+        # boot exclusivity check and fail this test for reasons it doesn't
+        # assert.
+        monkeypatch.delenv("ACP_CLONE_ROOT", raising=False)
         settings = Settings.from_env()
         assert settings.sandbox_enabled is True
         assert settings.sandbox_api_url == "http://sbx:5000/"
@@ -206,6 +224,10 @@ class TestSettingsParsing:
     def test_enabled_without_api_url_raises(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        # Same isolation as above, as defensive symmetry: the missing-url
+        # guard fires before the exclusivity check, so an ambient clone root
+        # cannot mask this assertion — the delenv just keeps the env hermetic.
+        monkeypatch.delenv("ACP_CLONE_ROOT", raising=False)
         monkeypatch.setenv("OS_WEBHOOK_SECRET", "s")
         monkeypatch.setenv("SANDBOX_ENABLED", "1")
         monkeypatch.delenv("SANDBOX_API_URL", raising=False)
@@ -543,10 +565,11 @@ class TestAcpHostWiring:
         materialized = tmp_path / "materialized"
         materialized.mkdir()
         released: list[str] = []
-        install_spawn(monkeypatch, FakeConn(), FakeProc())
+        install_spawn(monkeypatch, FakeConn(prompt_exc=RuntimeError("boom")), FakeProc())
         host = AcpHost(
-            # Negative prompt timeout forces the session to fail right away.
-            make_settings(tmp_path, acp_prompt_timeout=-1.0),
+            # A prompt failure is the session failure (the old negative
+            # prompt-timeout trick no longer exists: the ceiling is opt-in).
+            make_settings(tmp_path),
             EventStore(),
             bridge=self._bridge_over(materialized, released),
         )

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import os
 import sys
 from typing import Any
@@ -105,6 +106,17 @@ async def run(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    # Mirror the service's logging setup (``__main__.py``) so the harness trace
+    # — ``[harness]`` lines at INFO — is visible when the smoke is run by hand.
+    # A no-op when the caller already configured logging.
+    logging.basicConfig(
+        level=getattr(
+            logging,
+            os.environ.get("WEBHOOK_LOG_LEVEL", "info").strip().upper(),
+            logging.INFO,
+        ),
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
     try:
         return asyncio.run(run(args))
     except AcpHostError as exc:

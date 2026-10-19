@@ -1,12 +1,15 @@
 """ACP host (Phase 2): drives one cold ``opencode`` session per PromptInfo.
 
 Plan §7 Phase 2 / §3.2: for each dequeued envelope the host spawns
-``<opencode> acp --cwd <workspace>`` over stdio JSON-RPC (Agent Client
-Protocol), initializes, opens a session, sends one prompt, streams the
+``<opencode> acp`` over stdio JSON-RPC (Agent Client Protocol) with the
+workspace as the process cwd (opencode >= 2.0 removed the ``--cwd`` flag;
+the cwd is set on the process and again on ``session/new``), initializes,
+opens a session, sends one prompt, streams the
 ``session/update`` notifications into the :class:`EventStore`, and collects
 the stop reason. No ``opencode serve`` container exists anywhere; the
-process is killed on every exit path (timeout ladder + context-manager
-kill, per ``spikes/acp/host_spike.py``). One client only (opencode) — this
+process is killed on every exit path (idle watchdog + optional hard
+ceiling + context-manager kill, per ``spikes/acp/host_spike.py``). One
+client only (opencode) — this
 is deliberately not a plugin system (Simplicity First).
 
 **Model/agent config is never pinned host-side** (plan §5 Decision 10):
@@ -16,22 +19,46 @@ never a lived-in checkout — carrying the fail-closed ``permission``
 deny-list from ``Settings.acp_denied_tools``).
 
 **EventStore contract (plan §5 Decision 7 — protocol events only; stable
-names; every event carries ``run_id`` = the PromptInfo id):**
+names; every event carries ``run_id`` = the PromptInfo id). ALL-traces
+(``docs/plans/webui-plan.md`` W0): every ``session/update`` kind maps to an
+event and nothing is filtered server-side — the UI filters; unrecognized
+kinds pass through as ``agent_update`` instead of being dropped:**
 
 ===========================  =====================================================
 Event type                   Data
 ===========================  =====================================================
+``user_message_chunk``       text (the dispatch prompt echo)
 ``agent_session_started``    session_id, protocol_version
 ``agent_message_chunk``      text (agent reply deltas)
+``agent_thought_chunk``      text (agent reasoning deltas)
 ``agent_tool_call``          tool_call_id, title, kind, status
+``agent_plan``               entries (full plan snapshot)
+``agent_plan_update``        plan (items/file/markdown delta, wire names)
+``agent_plan_removed``       plan_id
+``agent_commands_update``    commands (available-commands list)
+``agent_mode_update``        mode_id
+``agent_session_info``       title, updated_at
+``agent_config_update``      options (config-option list, wire names)
+``agent_update``             kind, payload (unrecognized kinds — never dropped)
 ``agent_usage``              used, size, cost
 ``agent_permission``         title, action, reason (policy decision)
 ``agent_finished``           session_id, stop_reason, ok, error (on failure)
 ===========================  =====================================================
 
-Other ``session/update`` kinds (plan deltas, mode changes, thought chunks,
-available commands) are consumed and ignored — extend the mapping here if
-the dashboard needs them.
+Structured payloads (``entries``, ``plan``, ``commands``, ``options``) are
+JSON-safe dumps with the protocol's wire aliases, so event data mirrors the
+wire shapes one-to-one.
+
+**Harness trace (``docs/plans/harness-trace-parity.md`` D1/D2/D3/D7):** the agent
+is spawned with ``--print-logs --log-level <ACP_HARNESS_LOG_LEVEL>`` so its own
+log stream — model calls, loop steps, context/skill loading — arrives on stderr
+while stdout stays the JSON-RPC channel, and ``drain_stderr`` surfaces each line
+at INFO with a ``[harness]`` label so journald is the single interleaved pane.
+Every line is also appended, redacted but otherwise unfiltered, to
+``<ACP_TRACE_ROOT>/<run_id>/harness.log`` with a ``manifest.json`` beside it
+(``trace_log``): journald rotates in about a day here and the event ring is
+volatile, so the run directory is the record. ``ACP_TRACE_ENABLED=false`` drops
+the flags, the files and the INFO logging together; nothing else changes.
 
 **Prompt seam (Phase 3):** the envelope's own ``prompt`` wins when present —
 the listener fills it with the open-ended orchestration prompt at enqueue
@@ -45,9 +72,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -62,6 +91,7 @@ from acp.schema import (
 from webhook_receiver.acp_policy import PermissionDecision, decide, respond
 from webhook_receiver.prompt_queue import PromptInfo
 from webhook_receiver.sandbox_bridge import SandboxBridge, SandboxWorkspace
+from webhook_receiver.trace_log import RunTrace, open_run_trace, redact
 
 if TYPE_CHECKING:
     from webhook_receiver.config import Settings
@@ -69,16 +99,21 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Light stderr redaction (same shape as the spike): never echo credentials.
-_REDACT_RE = re.compile(
-    r"(?i)((?:api[_-]?key|authorization|token|secret)\s*[=:]\s*)\S+"
-)
 # Grace window for killing the agent process during shutdown/cleanup.
 _KILL_GRACE_SECONDS = 5.0
 
 
 class AcpHostError(RuntimeError):
     """The ACP session failed to launch, timed out, or broke protocol."""
+
+
+class SessionWatchdogTimeout(TimeoutError):
+    """The idle watchdog (or the optional hard ceiling) ended the session.
+
+    Owner decision 2026-10-17: a live session is never killed on elapsed
+    time — only inactivity (no ``session/update`` for ``ACP_IDLE_TIMEOUT``)
+    ends a run, unless an operator opts into a hard ceiling.
+    """
 
 
 @dataclass(frozen=True)
@@ -88,6 +123,50 @@ class AcpRunResult:
     session_id: str
     stop_reason: str
     workspace: str
+
+
+def _resolve_prompt_race(
+    prompt_task: asyncio.Task[Any], watchdog_task: asyncio.Task[None]
+) -> Any:
+    """Resolve the prompt/watchdog race into one honest outcome.
+
+    ``asyncio.wait(..., FIRST_COMPLETED)`` can return with both tasks done
+    in the same loop turn — correlated in practice: a hung agent's stream
+    errors out right as the idle deadline expires — so both outcomes are
+    read guarded before one is chosen:
+
+    - a prompt that finished (result or exception) speaks for the run: its
+      result is the run's result, its exception the run's failure — even
+      against a same-turn ceiling verdict, a run that answered, succeeded;
+    - otherwise a watchdog verdict wins over the prompt's follow-on error:
+      the kill reason is the precise diagnosis, not the symptom of the
+      channel the kill tore down;
+    - a prompt that ended cancelled (e.g. the SDK cancelling the prompt
+      coroutine on connection loss) while the watchdog is still pending
+      fails honestly here instead of raising ``InvalidStateError`` off a
+      pending task's not-yet-set exception.
+    """
+    prompt_exc = (
+        prompt_task.exception()
+        if prompt_task.done() and not prompt_task.cancelled()
+        else None
+    )
+    watchdog_exc = (
+        watchdog_task.exception()
+        if watchdog_task.done() and not watchdog_task.cancelled()
+        else None
+    )
+    if prompt_exc is None and prompt_task.done() and not prompt_task.cancelled():
+        return prompt_task.result()
+    if watchdog_exc is not None:
+        raise watchdog_exc
+    if prompt_exc is not None:
+        raise prompt_exc
+    # Reachable in practice only when the prompt ended cancelled with the
+    # watchdog still pending — name that event, not the watchdog.
+    raise AcpHostError(
+        "prompt ended cancelled with no verdict (idle watchdog still pending)"
+    )
 
 
 def resolve_opencode_bin(settings: Settings) -> str:
@@ -123,6 +202,28 @@ def build_prompt(info: PromptInfo) -> str:
     )
 
 
+def _json_safe(obj: Any) -> Any:
+    """Best-effort JSON-safe form of a schema object for event payloads.
+
+    Pydantic models dump with their wire aliases (protocol-faithful shapes);
+    plain containers recurse; anything else stringifies rather than raising —
+    serializing a payload must never break the event stream.
+    """
+    if obj is None or isinstance(obj, (str, int, float, bool)):
+        return obj
+    dump = getattr(obj, "model_dump", None)
+    if callable(dump):
+        try:
+            return dump(mode="json", by_alias=True)
+        except Exception:  # noqa: BLE001 - payload shape is never worth a crash
+            pass
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(item) for item in obj]
+    if isinstance(obj, dict):
+        return {str(key): _json_safe(value) for key, value in obj.items()}
+    return str(obj)
+
+
 class HostClient:
     """ACP client callbacks: session_update mapping + permission policy.
 
@@ -136,20 +237,36 @@ class HostClient:
         self._settings = settings
         self._store = store
         self._run_id = run_id
+        # Idle-watchdog heartbeat (owner decision 2026-10-17): every
+        # session_update resets it, as does each harness stderr line (a
+        # silent-but-alive tool call keeps logging); only inactivity may
+        # end a live run. run() re-arms it when the prompt starts so the
+        # handshake never debits the idle budget.
+        self.last_activity = time.monotonic()
 
     async def session_update(self, session_id: str, update: Any, **_: Any) -> None:
+        """ALL-traces mapping (webui plan W0): every ``session/update`` kind
+        becomes an event; nothing is filtered server-side (the UI filters).
+        Unrecognized kinds pass through as ``agent_update`` so future protocol
+        additions are visible instead of silently dropped.
+        """
+        self.last_activity = time.monotonic()
         kind = getattr(update, "session_update", type(update).__name__)
-        if kind == "agent_message_chunk":
-            text = getattr(update.content, "text", None)
+        emit = self._store.emit
+        run_id = self._run_id
+        if kind in ("user_message_chunk", "agent_message_chunk", "agent_thought_chunk"):
+            text = getattr(getattr(update, "content", None), "text", None)
             if text:
-                self._store.emit(
-                    "agent_message_chunk", run_id=self._run_id, text=text
-                )
+                emit(kind, run_id=run_id, text=text)
+            else:
+                # No/empty/non-text content (e.g. an image block): the update
+                # still happened, so it passes through rather than dropping.
+                emit("agent_update", run_id=run_id, kind=kind, payload=_json_safe(update))
             return
         if kind in ("tool_call", "tool_call_update"):
-            self._store.emit(
+            emit(
                 "agent_tool_call",
-                run_id=self._run_id,
+                run_id=run_id,
                 tool_call_id=getattr(update, "tool_call_id", None),
                 title=getattr(update, "title", None),
                 kind=getattr(update, "kind", None),
@@ -157,19 +274,65 @@ class HostClient:
             )
             return
         if kind == "usage_update":
-            self._store.emit(
+            emit(
                 "agent_usage",
-                run_id=self._run_id,
+                run_id=run_id,
                 used=getattr(update, "used", None),
                 size=getattr(update, "size", None),
                 cost=getattr(update, "cost", None),
             )
             return
-        # Plan deltas, mode changes, thought/command updates: intentionally
-        # unmapped (module docstring). Debug-log only.
-        logger.debug(
-            "ACP session_update kind=%s ignored run_id=%s", kind, self._run_id
-        )
+        if kind == "plan":
+            emit(
+                "agent_plan",
+                run_id=run_id,
+                entries=_json_safe(getattr(update, "entries", None)),
+            )
+            return
+        if kind == "plan_update":
+            emit(
+                "agent_plan_update",
+                run_id=run_id,
+                plan=_json_safe(getattr(update, "plan", None)),
+            )
+            return
+        if kind == "plan_removed":
+            emit(
+                "agent_plan_removed",
+                run_id=run_id,
+                plan_id=getattr(update, "plan_id", None),
+            )
+            return
+        if kind == "available_commands_update":
+            emit(
+                "agent_commands_update",
+                run_id=run_id,
+                commands=_json_safe(getattr(update, "available_commands", None)),
+            )
+            return
+        if kind == "current_mode_update":
+            emit(
+                "agent_mode_update",
+                run_id=run_id,
+                mode_id=getattr(update, "current_mode_id", None),
+            )
+            return
+        if kind == "session_info_update":
+            emit(
+                "agent_session_info",
+                run_id=run_id,
+                title=getattr(update, "title", None),
+                updated_at=getattr(update, "updated_at", None),
+            )
+            return
+        if kind == "config_option_update":
+            emit(
+                "agent_config_update",
+                run_id=run_id,
+                options=_json_safe(getattr(update, "config_options", None)),
+            )
+            return
+        emit("agent_update", run_id=run_id, kind=kind, payload=_json_safe(update))
 
     async def request_permission(
         self, session_id: str, tool_call: Any, options: list[Any], **_: Any
@@ -252,6 +415,18 @@ class AcpHost:
         client = HostClient(self._settings, self._store, run_id=info.id)
         step = self._settings.acp_step_timeout
         prompt_timeout = self._settings.acp_prompt_timeout
+        idle_timeout = self._settings.acp_idle_timeout
+        trace_enabled = self._settings.acp_trace_enabled
+        trace: RunTrace | None = (
+            open_run_trace(
+                self._settings.acp_trace_root,
+                self._settings.acp_trace_keep_runs,
+                info,
+                workspace,
+            )
+            if trace_enabled
+            else None
+        )
         response: Any = None
         session_id: str | None = None
         conn: Any = None
@@ -262,57 +437,124 @@ class AcpHost:
             stream = proc.stderr if proc is not None else None
             if stream is None:
                 return
+            # The harness's own log stream (opencode ``--print-logs`` writes to
+            # stderr) is the detail the event contract does not carry, so it is
+            # surfaced at INFO — journald is the single pane (D1/D2) — and every
+            # line is also appended to the run's ``harness.log``, redacted but
+            # otherwise unfiltered (D3: the file is the record, the pane is the
+            # readable view). With trace capture off it stays a DEBUG drain:
+            # read so the pipe never blocks, not published.
+            log = logger.info if trace_enabled else logger.debug
             while True:
                 line = await stream.readline()
                 if not line:
                     return
-                logger.debug(
-                    "opencode stderr run_id=%s: %s",
-                    info.id,
-                    _REDACT_RE.sub(r"\1<redacted>", line.decode(errors="replace").rstrip()),
-                )
+                # Secondary liveness signal for the idle watchdog (the old
+                # orchestrator-service watchdog watched server-log growth
+                # alongside its mtime heartbeat): session/update fires at
+                # tool lifecycle boundaries, so a long-running tool call is
+                # silent on that channel while the harness keeps logging —
+                # a harness still emitting lines is alive.
+                client.last_activity = time.monotonic()
+                text = redact(line.decode(errors="replace").rstrip())
+                if trace is not None:
+                    trace.write(text)
+                log("[harness] run_id=%s: %s", info.id, text)
 
         try:
-            async with asyncio.timeout(step * 3 + prompt_timeout):
-                async with spawn_agent_process(
-                    client, bin_path, "acp", "--cwd", str(workspace)
-                ) as (conn, proc):
-                    drainer = asyncio.create_task(drain_stderr())
-                    init = await asyncio.wait_for(
-                        conn.initialize(
-                            PROTOCOL_VERSION,
-                            client_capabilities=ClientCapabilities(),
-                            client_info=Implementation(
-                                name="swarm-orchestration-host", version="0.2.0"
-                            ),
+            # opencode >= 2.0 rejects `--cwd` outright — the workspace rides
+            # the process cwd (and session/new below).
+            agent_args = ["acp"]
+            if trace_enabled:
+                agent_args += [
+                    "--print-logs",
+                    "--log-level",
+                    self._settings.acp_harness_log_level.lower(),
+                ]
+            # A live session is never killed on a stopwatch (owner decision
+            # 2026-10-17): the prompt runs under an idle watchdog — killed
+            # only after ACP_IDLE_TIMEOUT with no session updates, protocol
+            # events as the heartbeat (the old orchestrator-service
+            # watchdog's idle model, ported off the server-log mtime onto
+            # Decision 7's event channel) — with ACP_PROMPT_TIMEOUT as an
+            # optional hard ceiling, disabled by default. Handshake steps
+            # keep their per-step limits below.
+            async with spawn_agent_process(
+                    client,
+                    bin_path,
+                    *agent_args,
+                    # The SDK's spawner trims the environment to an MCP-safe
+                    # subset (no GITHUB_TOKEN / provider keys) unless the env
+                    # is passed explicitly — sessions would run credential-less.
+                    # OS_WEBHOOK_SECRET stays receiver-side: the agent has no
+                    # use for the webhook signing secret.
+                    env={
+                        k: v
+                        for k, v in os.environ.items()
+                        if k != "OS_WEBHOOK_SECRET"
+                    },
+                cwd=str(workspace),
+            ) as (conn, proc):
+                drainer = asyncio.create_task(drain_stderr())
+                init = await asyncio.wait_for(
+                    conn.initialize(
+                        PROTOCOL_VERSION,
+                        client_capabilities=ClientCapabilities(),
+                        client_info=Implementation(
+                            name="swarm-orchestration-host", version="0.2.0"
                         ),
-                        step,
+                    ),
+                    step,
+                )
+                session = await asyncio.wait_for(
+                    conn.new_session(cwd=str(workspace)), step
+                )
+                session_id = session.session_id
+                self._store.emit(
+                    "agent_session_started",
+                    run_id=info.id,
+                    session_id=session_id,
+                    protocol_version=init.protocol_version,
+                )
+                # The idle budget starts when the prompt starts: spawn +
+                # initialize + new_session must not debit it, or a slow
+                # handshake with ACP_IDLE_TIMEOUT configured near it kills
+                # a fresh, about-to-stream session on the first poll.
+                client.last_activity = time.monotonic()
+                prompt_task = asyncio.ensure_future(
+                    conn.prompt(
+                        session_id,
+                        [TextContentBlock(type="text", text=build_prompt(info))],
                     )
-                    session = await asyncio.wait_for(
-                        conn.new_session(cwd=str(workspace)), step
+                )
+                watchdog_task = asyncio.ensure_future(
+                    self._idle_watchdog(client, idle_timeout, prompt_timeout)
+                )
+                try:
+                    await asyncio.wait(
+                        {prompt_task, watchdog_task},
+                        return_when=asyncio.FIRST_COMPLETED,
                     )
-                    session_id = session.session_id
-                    self._store.emit(
-                        "agent_session_started",
-                        run_id=info.id,
-                        session_id=session_id,
-                        protocol_version=init.protocol_version,
-                    )
-                    response = await asyncio.wait_for(
-                        conn.prompt(
-                            session_id,
-                            [TextContentBlock(type="text", text=build_prompt(info))],
-                        ),
-                        prompt_timeout,
-                    )
+                    response = _resolve_prompt_race(prompt_task, watchdog_task)
+                finally:
+                    # Both-done race: whichever outcome was not raised must
+                    # still be consumed — an exception left sitting on a done
+                    # task logs "Task exception was never retrieved" at GC.
+                    # Pending siblings are cancelled as before.
+                    for task in (prompt_task, watchdog_task):
+                        if not task.done():
+                            task.cancel()
+                        elif not task.cancelled():
+                            task.exception()
         except asyncio.CancelledError:
             raise  # shutdown: cleanup below, no run-level event
         except Exception as exc:
-            error = (
-                f"acp run timed out after {step * 3 + prompt_timeout:.0f}s"
-                if isinstance(exc, TimeoutError)
-                else f"{type(exc).__name__}: {exc}"
-            )
+            if isinstance(exc, TimeoutError):
+                # Watchdog/ceiling timeouts carry their own precise message;
+                # a bare TimeoutError is a handshake step hitting its limit.
+                error = str(exc) or f"acp handshake step timed out (limit {step:.0f}s)"
+            else:
+                error = f"{type(exc).__name__}: {exc}"
             self._store.emit(
                 "agent_finished",
                 run_id=info.id,
@@ -321,11 +563,18 @@ class AcpHost:
                 ok=False,
                 error=error,
             )
+            if trace is not None:
+                trace.finish(ok=False, error=error, session_id=session_id)
             raise AcpHostError(f"acp session failed for delivery {info.delivery_id}: {error}") from exc
         finally:
             if drainer is not None and not drainer.done():
                 drainer.cancel()
                 await asyncio.gather(drainer, return_exceptions=True)
+            if trace is not None:
+                # Closed after the drainer so no line is written to a closed
+                # handle. A shutdown cancel leaves the manifest without
+                # ``ended_at`` — that absence is the record of an abandoned run.
+                trace.close()
             if proc is not None and proc.returncode is None:
                 # Kill-on-exit orphan hygiene (spike pattern). The kill is
                 # the guarantee; reaping gets a short grace window and may
@@ -357,11 +606,53 @@ class AcpHost:
             stop_reason=stop_reason,
             ok=True,
         )
+        if trace is not None:
+            trace.finish(
+                ok=True, stop_reason=stop_reason or "", session_id=session_id
+            )
         return AcpRunResult(
             session_id=session_id or "",
             stop_reason=stop_reason or "",
             workspace=str(workspace),
         )
+
+    async def _idle_watchdog(
+        self, client: HostClient, idle_timeout: float, ceiling: float
+    ) -> None:
+        """End the run only when it goes silent.
+
+        Raises :class:`SessionWatchdogTimeout` after ``idle_timeout`` with no
+        liveness signal — any ``session/update`` resets the clock, and so
+        does each harness stderr line (a silent-but-alive tool call keeps
+        logging; the old orchestrator-service watchdog's second signal,
+        ported) — so a live session is never killed on total elapsed time —
+        or at the optional ``ceiling`` (``ACP_PROMPT_TIMEOUT``; 0 =
+        disabled). The old watchdog polled a server-log mtime; the
+        heartbeat here is Decision 7's event channel plus the stderr tap.
+        Residual accepted window: with ``ACP_TRACE_ENABLED=false`` the
+        harness does not log, so a single tool call silent longer than
+        ``idle_timeout`` is the kill — size ``ACP_IDLE_TIMEOUT`` above the
+        longest expected silent tool call.
+        """
+        started = time.monotonic()
+        # Poll finely enough that either limit fires on time: bounded by the
+        # idle limit, the ceiling (when set), and 5s (the old watchdog's
+        # WATCHDOG_POLL_SECS ceiling) — never coarser than the nearest kill.
+        poll = min(idle_timeout, ceiling if ceiling > 0 else idle_timeout, 5.0)
+        while True:
+            await asyncio.sleep(poll)
+            silent_for = time.monotonic() - client.last_activity
+            if silent_for >= idle_timeout:
+                raise SessionWatchdogTimeout(
+                    f"idle watchdog killed the run after {silent_for:.0f}s with "
+                    f"no session updates (limit {idle_timeout:.0f}s, "
+                    "ACP_IDLE_TIMEOUT)"
+                )
+            if ceiling > 0 and time.monotonic() - started >= ceiling:
+                raise SessionWatchdogTimeout(
+                    f"acp run timed out after {ceiling:.0f}s "
+                    "(hard ceiling, ACP_PROMPT_TIMEOUT)"
+                )
 
     async def _prepare_workspace(self, info: PromptInfo) -> Path:
         """Session cwd for the agent; a scratch dir is never the service's

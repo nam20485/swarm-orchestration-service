@@ -63,3 +63,5 @@ Avalonia Desktop App template
 ### CI
 
 - GHA workflows
+
+<!-- canary: jade-pika-16 -->

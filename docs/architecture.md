@@ -70,7 +70,7 @@ AcpHost.run                                                acp_host.py
   |  workspace: SwarmSandbox clone (SANDBOX_ENABLED=true)
   |  or plain scratch dir (/tmp/swarm-acp-workspaces)
   |  belt-and-braces opencode.json deny-list in the workspace
-  |  spawn `opencode acp --cwd <workspace>`: initialize ->
+  |  spawn `opencode acp` (workspace as process cwd): initialize ->
   |  session/new -> one prompt -> collect stop reason -> kill
   v
 events for every step                                      event_store.py
@@ -113,14 +113,21 @@ Two run modes matter operationally:
 
 ## Eventing
 
-Every step emits a named event into an in-process ring buffer (bounded 1000
-entries); `GET /events` streams the buffer over SSE with full replay on
-subscribe, live fan-out, and idle keepalives. The 15-event contract —
-`webhook_*`, `prompt_*`, `sandbox_*`, `agent_*` — is documented in the
+Every step emits a named event into an in-process ring buffer (bounded by
+`WEBHOOK_EVENTS_MAXLEN`, default 1000); `GET /events` streams the buffer over
+SSE with full replay on subscribe, live fan-out, and idle keepalives. Beyond the ring, a durable
+JSONL tail (`WEBHOOK_EVENTS_LOG_ENABLED`, default on) appends every event
+under the trace root — per-run `events.jsonl` beside the harness trace, plus
+a rotated global tail — read back via `GET /runs`; history survives restarts.
+The 24-event contract — `webhook_*`, `prompt_*`, `sandbox_*`,
+`user_message_chunk`, `agent_*` — is documented in the
 `app.py` module docstring and summarized in
-[`src/webhook_receiver/README.md`](../src/webhook_receiver/README.md). This
-is the surface a dashboard consumes; none is built yet (the old stack's
-dashboard was not ported).
+[`src/webhook_receiver/README.md`](../src/webhook_receiver/README.md). A
+first-cut observability page consumes it: `GET /` serves a static,
+no-build HTML+JS view (webui plan W2) over the live SSE feed, durable run
+history (`/runs`), and the rotated webhook tail (`/events/history`) —
+listener-local like the rest of the dashboard surface (the old stack's
+full dashboard was not ported; see `docs/plans/webui-plan.md`).
 
 ## Design records
 

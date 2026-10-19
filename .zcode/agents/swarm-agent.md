@@ -2,8 +2,8 @@
 name: "swarm-agent"
 description: "Generic least-privilege swarm worker: read-only analysis, search, and reporting for one delegated task. Extend this definition (copy it, add only the tools the task needs) when a task requires writing, running commands, or web access."
 color: yellow
-model: "custom:builtin%3Azai-coding-plan:GLM-5.3-Flash"
-thoughtLevel: off
+model: "account:zai-individual-coding-plan/GLM-5.3-Flash"
+thoughtLevel: low
 injectAgentsMd: false
 tools: [Read, Grep, Glob]
 maxTurns: 25

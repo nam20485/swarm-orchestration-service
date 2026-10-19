@@ -68,6 +68,9 @@ $runTag = [guid]::NewGuid().ToString('N').Substring(0, 8)
 $logDir = Join-Path ([System.IO.Path]::GetTempPath()) "e2e-orchestration-$runTag"
 $script:Listener = $null
 $script:EnvBackup = $null
+# StrictMode reads this in the finally even if the venv bootstrap throws
+# before New-RunEnvironment ever assigns it — initialize at script scope.
+$script:TraceRootDir = $null
 
 function Assert-Equal {
     param([string]$Name, $Actual, $Expected)
@@ -159,7 +162,7 @@ function Get-DashboardEvents {
             if ($line -eq '') {
                 if ($current.Count -gt 0) {
                     $events.Add([pscustomobject]@{
-                        id   = [int]$current['id']
+                        id   = [string]$current['id'] # "<boot-epoch>-<boot-token>-<seq>" — opaque, unique across restarts
                         type = $current['event']
                         data = $current['data'] | ConvertFrom-Json
                     })
@@ -193,10 +196,12 @@ function Assert-DeliveryEvents {
 
 function New-RunEnvironment {
     # Back up the caller's values for the knobs we set; restored in finally.
+    $script:TraceRootDir = $null
     $script:EnvBackup = @{}
     foreach ($name in @(
         'OS_WEBHOOK_SECRET', 'ACP_ENABLED', 'SANDBOX_ENABLED',
-        'WEBHOOK_HOST', 'WEBHOOK_PORT', 'WEBHOOK_LOG_LEVEL', 'PYTHONPATH'
+        'WEBHOOK_HOST', 'WEBHOOK_PORT', 'WEBHOOK_LOG_LEVEL', 'PYTHONPATH',
+        'ACP_TRACE_ROOT'
     )) {
         $script:EnvBackup[$name] = [Environment]::GetEnvironmentVariable($name)
     }
@@ -206,6 +211,11 @@ function New-RunEnvironment {
     $env:WEBHOOK_HOST = '127.0.0.1'
     $env:WEBHOOK_PORT = "$Port"
     $env:WEBHOOK_LOG_LEVEL = 'info'
+    # Isolate the simulator's durable tail from production history: without
+    # this the run shares the repo's logs/runs (default trace root) and e2e
+    # artifacts masquerade as live webhooks in the observability surface.
+    $script:TraceRootDir = Join-Path ([IO.Path]::GetTempPath()) ("e2e-trace-" + [Guid]::NewGuid().ToString('N'))
+    $env:ACP_TRACE_ROOT = $script:TraceRootDir
     # The service lives under src/ (the compose image bakes the same layout
     # into /app); tests get the same path via conftest.py.
     $srcDir = Join-Path $repoRoot 'src'
@@ -376,6 +386,9 @@ finally {
             $script:Listener | Stop-Process -Force -ErrorAction SilentlyContinue
             Write-Host 'listener did not exit gracefully; force-killed.' -ForegroundColor Yellow
         }
+    }
+    if ($script:TraceRootDir -and (Test-Path $script:TraceRootDir)) {
+        Remove-Item -Recurse -Force $script:TraceRootDir -ErrorAction SilentlyContinue
     }
     if (Test-Path $logDir) { Remove-Item -Recurse -Force $logDir -ErrorAction SilentlyContinue }
     if ($script:EnvBackup) { Restore-RunEnvironment }

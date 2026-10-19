@@ -31,10 +31,16 @@ class TestFromEnv:
             "ACP_CLONE_ROOT",
             "ACP_STEP_TIMEOUT",
             "ACP_PROMPT_TIMEOUT",
+            "ACP_IDLE_TIMEOUT",
             "ACP_DEFAULT_PERMISSION",
             "ACP_DENY_PATTERNS",
             "ACP_DENIED_TOOLS",
+            "ACP_TRACE_ENABLED",
+            "ACP_HARNESS_LOG_LEVEL",
+            "ACP_TRACE_ROOT",
+            "ACP_TRACE_KEEP_RUNS",
             "WEBHOOK_EVENTS_KEEPALIVE",
+            "WEBHOOK_EVENTS_MAXLEN",
         ):
             monkeypatch.delenv(name, raising=False)
         cfg = Settings.from_env()
@@ -50,12 +56,23 @@ class TestFromEnv:
         assert cfg.acp_workspace_root == ""
         assert cfg.acp_clone_root == ""
         assert cfg.acp_step_timeout == 30.0
-        assert cfg.acp_prompt_timeout == 600.0
+        # Session supervision (owner decision 2026-10-17): idle watchdog
+        # governs; the hard ceiling is opt-in (0 = disabled).
+        assert cfg.acp_idle_timeout == 300.0
+        assert cfg.acp_prompt_timeout == 0.0
         assert cfg.acp_default_permission == "reject"
         assert cfg.acp_deny_patterns == ()
         assert cfg.acp_denied_tools == ()
+        # Harness trace (docs/plans/harness-trace-parity.md D1): on, at info.
+        assert cfg.acp_trace_enabled is True
+        assert cfg.acp_harness_log_level == "info"
+        # S2: artifacts land under logs/runs (relative to the service cwd,
+        # gitignored) with a 50-run retention window.
+        assert cfg.acp_trace_root == ""
+        assert cfg.acp_trace_keep_runs == 50
         # Dashboard SSE (Phase 5).
         assert cfg.events_keepalive == 15.0
+        assert cfg.events_maxlen == 1000
 
     def test_env_overrides(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("OS_WEBHOOK_SECRET", "FAKE-WEBHOOK-SECRET-FOR-TESTING")
@@ -77,6 +94,16 @@ class TestFromEnv:
         assert Settings.from_env().events_keepalive == 2.5
         monkeypatch.setenv("WEBHOOK_EVENTS_KEEPALIVE", "0")
         with pytest.raises(ValueError, match="WEBHOOK_EVENTS_KEEPALIVE"):
+            Settings.from_env()
+
+    def test_events_maxlen_override_and_validation(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("OS_WEBHOOK_SECRET", "FAKE-WEBHOOK-SECRET-FOR-TESTING")
+        monkeypatch.setenv("WEBHOOK_EVENTS_MAXLEN", "5000")
+        assert Settings.from_env().events_maxlen == 5000
+        monkeypatch.setenv("WEBHOOK_EVENTS_MAXLEN", "0")
+        with pytest.raises(ValueError, match="WEBHOOK_EVENTS_MAXLEN"):
             Settings.from_env()
 
 
@@ -103,18 +130,71 @@ class TestAcpFromEnv:
         monkeypatch.setenv("ACP_CLONE_ROOT", "~/src/github/nam20485/dynamic_workflows")
         monkeypatch.setenv("ACP_STEP_TIMEOUT", "5.5")
         monkeypatch.setenv("ACP_PROMPT_TIMEOUT", "120")
+        monkeypatch.setenv("ACP_IDLE_TIMEOUT", "900")
         monkeypatch.setenv("ACP_DEFAULT_PERMISSION", "allow_once")
         monkeypatch.setenv("ACP_DENY_PATTERNS", "rm\\s+-rf, git\\s+push\\s+--force")
         monkeypatch.setenv("ACP_DENIED_TOOLS", "bash, write")
+        monkeypatch.setenv("ACP_TRACE_ENABLED", "false")
+        monkeypatch.setenv("ACP_HARNESS_LOG_LEVEL", "debug")
+        monkeypatch.setenv("ACP_TRACE_ROOT", "~/var/swarm-traces")
+        monkeypatch.setenv("ACP_TRACE_KEEP_RUNS", "7")
         cfg = Settings.from_env()
         assert cfg.acp_opencode_bin == "/usr/local/bin/opencode"
         assert cfg.acp_workspace_root == "/tmp/ws"
         assert cfg.acp_clone_root == "~/src/github/nam20485/dynamic_workflows"
         assert cfg.acp_step_timeout == 5.5
         assert cfg.acp_prompt_timeout == 120.0
+        assert cfg.acp_idle_timeout == 900.0
         assert cfg.acp_default_permission == "allow_once"
         assert cfg.acp_deny_patterns == ("rm\\s+-rf", "git\\s+push\\s+--force")
         assert cfg.acp_denied_tools == ("bash", "write")
+        assert cfg.acp_trace_enabled is False
+        assert cfg.acp_harness_log_level == "debug"
+        assert cfg.acp_trace_root == "~/var/swarm-traces"
+        assert cfg.acp_trace_keep_runs == 7
+
+    def test_invalid_trace_keep_runs_raises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("OS_WEBHOOK_SECRET", self.SECRET)
+        monkeypatch.setenv("ACP_TRACE_KEEP_RUNS", "0")
+        with pytest.raises(ValueError, match="ACP_TRACE_KEEP_RUNS must be at least 1"):
+            Settings.from_env()
+
+    def test_idle_timeout_override_and_validation(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Mirrors the keepalive/maxlen pair: the override binds, and a
+        # non-positive value refuses to boot (0 would mean the watchdog
+        # kills every run on its first poll).
+        monkeypatch.setenv("OS_WEBHOOK_SECRET", self.SECRET)
+        monkeypatch.setenv("ACP_IDLE_TIMEOUT", "45.5")
+        assert Settings.from_env().acp_idle_timeout == 45.5
+        monkeypatch.setenv("ACP_IDLE_TIMEOUT", "0")
+        with pytest.raises(
+            ValueError, match="ACP_IDLE_TIMEOUT must be a positive number"
+        ):
+            Settings.from_env()
+        monkeypatch.setenv("ACP_IDLE_TIMEOUT", "-1")
+        with pytest.raises(ValueError, match="ACP_IDLE_TIMEOUT"):
+            Settings.from_env()
+
+    def test_invalid_harness_log_level_raises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("OS_WEBHOOK_SECRET", self.SECRET)
+        monkeypatch.setenv("ACP_HARNESS_LOG_LEVEL", "verbose")
+        with pytest.raises(ValueError, match="ACP_HARNESS_LOG_LEVEL must be one of"):
+            Settings.from_env()
+
+    def test_harness_log_level_normalizes_legacy_uppercase(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # opencode >= 2.0 rejects uppercase --log-level values; a legacy
+        # uppercase setting keeps working by normalizing at boot.
+        monkeypatch.setenv("OS_WEBHOOK_SECRET", self.SECRET)
+        monkeypatch.setenv("ACP_HARNESS_LOG_LEVEL", "INFO")
+        assert Settings.from_env().acp_harness_log_level == "info"
 
     def test_invalid_default_permission_raises(
         self, monkeypatch: pytest.MonkeyPatch
