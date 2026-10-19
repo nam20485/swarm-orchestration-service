@@ -44,10 +44,14 @@ memory-graph startup/finale and sequential-thinking are stripped (discontinued
 in this repo, ``.agents/rules/tools.md``); epic completion is marked by closing
 the epic issue rather than the deprecated rev1 ``implementation:complete``
 label (which would re-enter the dispatch gate and burn a default-clause run);
-``extract_epic_from_title`` parses the skill's ``Epic <N>: <Name>``
-numbered-title convention; the Phase 3 new-app-vs-existing-feature discovery
-section is dropped (the direct-body kickoff issue carries the explicit
-instructions).
+epic handoffs carry the epic ISSUE NUMBER per the canonical
+agent-instructions contracts (``implement-epic`` / ``review-epic-prs``
+``$epic`` = "Epic issue object or issue number"; ``single-workflow`` takes
+``$workflow_assignment`` + ``$assignment_inputs``), retiring the reference's
+``extract_epic_from_title`` helper — with rev2 numbered titles the
+``Epic <N>:`` ordinal is NOT the issue number; the Phase 3
+new-app-vs-existing-feature discovery section is dropped (the direct-body
+kickoff issue carries the explicit instructions).
 
 Shape (string composition only — no templating engine, Simplicity First):
 one scaffold (envelope context, key-sorted EVENT_DATA JSON, mechanical-
@@ -99,21 +103,21 @@ _INIT_SUCCESS_CLAUSE = """\
   - postStatusUpdate("✅ All epics are already complete. The implementation plan is fully implemented.")
   - skip to ##Final.
 - postStatusUpdate("🤖 Next unimplemented epic found: #" + $next_epic.number + " — " + $next_epic.title + ". Starting `implement-epic`...")
-- $epic_id = extract_epic_from_title($next_epic.title)
-- if $epic_id is null:
-  - postStatusUpdate("❌ Could not parse epic identifier from issue title (#" + $next_epic.number + "). Cannot proceed with implementation.")
-  - comment on the issue with an error explaining the title could not be parsed, then skip to ##Final.
 - /orchestrate-dynamic-workflow
-    $workflow_name = implement-epic { $epic = $epic_id }
+    $workflow_name = implement-epic { $epic = $next_epic.number }
+  ## `$epic` carries the epic ISSUE NUMBER — the canonical implement-epic
+  ## input contract ("Epic issue object or issue number" → getepic). The
+  ## reference file's title-derived epic identifier is rev1 legacy: with rev2
+  ## numbered titles (`Epic <N>: <Name>`) the ordinal is NOT the issue number.
 - if implement-epic succeeds:
-  - postStatusUpdate("✅ `implement-epic` completed for epic #" + $next_epic.number + " (" + $epic_id + "). Applying `gh-issue-tracking:epic-implemented` label.")
+  - postStatusUpdate("✅ `implement-epic` completed for epic #" + $next_epic.number + " — " + $next_epic.title + ". Applying `gh-issue-tracking:epic-implemented` label.")
   - apply label "gh-issue-tracking:epic-implemented" to that epic issue (issue number $next_epic.number).
     ## NEXT STAGE: applying the label fires the next webhook; the
     ## `gh-issue-tracking:epic-implemented` clause runs review-epic-prs →
     ## report-progress → debrief-and-document → completion, then loops back
     ## to pick the next unimplemented epic. (The reference file documents
     ## this follow-on as deferred; it is implemented in this builder.)
-- else → postStatusUpdate("❌ `implement-epic` failed for epic #" + $next_epic.number + " (" + $epic_id + "). See workflow run logs."), skip to ##Final."""
+- else → postStatusUpdate("❌ `implement-epic` failed for epic #" + $next_epic.number + " — " + $next_epic.title + ". See workflow run logs."), skip to ##Final."""
 
 _EPIC_IMPLEMENTED_CLAUSE = """\
 ## Matched clause: `gh-issue-tracking:epic-implemented` + `epic`
@@ -126,32 +130,34 @@ _EPIC_IMPLEMENTED_CLAUSE = """\
 ## steps re-key the proven rev1 per-epic sequence (steps 2-4 plus the
 ## epic-complete loop) onto the rev2 label vocabulary.
 
-- postStatusUpdate("🤖 Orchestrator matched `gh-issue-tracking:epic-implemented` + `epic` clause. Parsing epic from title...")
-- $implemented_epic = extract_epic_from_title(title)
-- if $implemented_epic is null or empty:
-  - postStatusUpdate("❌ Could not parse epic identifier from issue title. Cannot proceed with PR review.")
-  - comment on the issue with an error explaining the title could not be parsed, then skip to ##Final.
+- $epic_number = the triggering issue's number (EVENT_DATA `event.issue.number`); $epic_title = its title
+- postStatusUpdate("🤖 Orchestrator matched `gh-issue-tracking:epic-implemented` + `epic` clause. Completing epic #" + $epic_number + " — " + $epic_title)
 
 ## Step 1/3: Review, approve, and merge all PRs for this epic
 ## This step handles: CI verification & remediation, code review delegation,
 ## auto-reviewer wait, PR comment resolution, and merge execution.
-- postStatusUpdate("🤖 Step 1/3: Starting `review-epic-prs` for epic: " + $implemented_epic)
+- postStatusUpdate("🤖 Step 1/3: Starting `review-epic-prs` for epic #" + $epic_number)
 - /orchestrate-dynamic-workflow
-    $workflow_name = review-epic-prs { $epic = $implemented_epic }
+    $workflow_name = review-epic-prs { $epic = $epic_number }
+  ## `$epic` = the epic ISSUE NUMBER (canonical review-epic-prs contract:
+  ## "Epic issue object or issue number").
 - if review-epic-prs fails:
-  - postStatusUpdate("❌ Step 1/3 `review-epic-prs` failed for: " + $implemented_epic + ". See workflow run logs.")
+  - postStatusUpdate("❌ Step 1/3 `review-epic-prs` failed for epic #" + $epic_number + ". See workflow run logs.")
   - skip to ##Final.
-- postStatusUpdate("✅ Step 1/3: `review-epic-prs` completed for: " + $implemented_epic + ". Starting progress report...")
+- postStatusUpdate("✅ Step 1/3: `review-epic-prs` completed for epic #" + $epic_number + ". Starting progress report...")
 
 ## Step 2/3: Report progress and capture action items
 ## Lightweight: report progress, flag deviations, note plan-impacting discoveries.
-- postStatusUpdate("🤖 Step 2/3: Starting `report-progress` for epic: " + $implemented_epic)
+- postStatusUpdate("🤖 Step 2/3: Starting `report-progress` for epic #" + $epic_number)
 - /orchestrate-dynamic-workflow
-    $workflow_name = single-workflow { $workflow_assignment = report-progress, $epic = $implemented_epic }
+    $workflow_name = single-workflow { $workflow_assignment = report-progress, $assignment_inputs = { epic = $epic_number } }
+  ## Canonical single-workflow contract: `$workflow_assignment` (shortId) +
+  ## `$assignment_inputs` (object) — the reference file's flat `$epic = ...`
+  ## argument form predates it.
 - if report-progress fails:
-  - postStatusUpdate("❌ Step 2/3 `report-progress` failed for: " + $implemented_epic + ". See workflow run logs.")
+  - postStatusUpdate("❌ Step 2/3 `report-progress` failed for epic #" + $epic_number + ". See workflow run logs.")
   - skip to ##Final.
-- postStatusUpdate("✅ Step 2/3: `report-progress` completed for: " + $implemented_epic + ". Reviewing for action items...")
+- postStatusUpdate("✅ Step 2/3: `report-progress` completed for epic #" + $epic_number + ". Reviewing for action items...")
 - Review the report for any ACTION ITEMS (deviations, new findings, plan-impacting issues).
 - if ACTION ITEMS are found:
   - postStatusUpdate("⚠️ Action items found in progress report. Filing issues for newly-discovered work.")
@@ -159,11 +165,11 @@ _EPIC_IMPLEMENTED_CLAUSE = """\
   - Update descriptions of upcoming epics/phases if needed.
 
 ## Step 3/3: Debrief and document
-- postStatusUpdate("🤖 Step 3/3: Starting `debrief-and-document` for epic: " + $implemented_epic)
+- postStatusUpdate("🤖 Step 3/3: Starting `debrief-and-document` for epic #" + $epic_number)
 - /orchestrate-dynamic-workflow
-    $workflow_name = single-workflow { $workflow_assignment = debrief-and-document, $epic = $implemented_epic }
+    $workflow_name = single-workflow { $workflow_assignment = debrief-and-document, $assignment_inputs = { epic = $epic_number } }
 - if debrief-and-document fails:
-  - postStatusUpdate("❌ Step 3/3 `debrief-and-document` failed for: " + $implemented_epic + ". See workflow run logs.")
+  - postStatusUpdate("❌ Step 3/3 `debrief-and-document` failed for epic #" + $epic_number + ". See workflow run logs.")
   - skip to ##Final.
 
 ## Mark this epic complete
@@ -171,7 +177,7 @@ _EPIC_IMPLEMENTED_CLAUSE = """\
 ## the `labeled` gate, so it costs no extra dispatch). The deprecated rev1
 ## `implementation:complete` label is deliberately NOT applied — it would
 ## re-enter the dispatch gate and burn a default-clause run.
-- postStatusUpdate("✅ Epic " + $implemented_epic + " reviewed, reported, and debriefed. Closing this epic.")
+- postStatusUpdate("✅ Epic #" + $epic_number + " reviewed, reported, and debriefed. Closing this epic.")
 - close this epic issue with a short comment indicating it is complete.
 
 ## Loop: pick the next unimplemented epic
@@ -181,16 +187,14 @@ _EPIC_IMPLEMENTED_CLAUSE = """\
   - close the plan issue with a final comment "All epics are complete. The implementation plan is fully implemented."
   - skip to ##Final.
 - postStatusUpdate("🤖 Next unimplemented epic found: #" + $next_epic.number + " — " + $next_epic.title + ". Starting `implement-epic`...")
-- $epic_id = extract_epic_from_title($next_epic.title)
-- if $epic_id is null:
-  - postStatusUpdate("❌ Could not parse epic identifier from issue title (#" + $next_epic.number + "). Cannot proceed with implementation.")
-  - comment on the issue with an error explaining the title could not be parsed, then skip to ##Final.
 - /orchestrate-dynamic-workflow
-    $workflow_name = implement-epic { $epic = $epic_id }
+    $workflow_name = implement-epic { $epic = $next_epic.number }
+  ## `$epic` = the epic ISSUE NUMBER (canonical implement-epic contract; see
+  ## the init-success clause's note).
 - if implement-epic succeeds:
-  - postStatusUpdate("✅ `implement-epic` completed for epic #" + $next_epic.number + " (" + $epic_id + "). Applying `gh-issue-tracking:epic-implemented` label.")
+  - postStatusUpdate("✅ `implement-epic` completed for epic #" + $next_epic.number + " — " + $next_epic.title + ". Applying `gh-issue-tracking:epic-implemented` label.")
   - apply label "gh-issue-tracking:epic-implemented" to that epic issue (issue number $next_epic.number) — its webhook fires the next iteration of this clause.
-- else → postStatusUpdate("❌ `implement-epic` failed for epic #" + $next_epic.number + " (" + $epic_id + "). See workflow run logs."), skip to ##Final."""
+- else → postStatusUpdate("❌ `implement-epic` failed for epic #" + $next_epic.number + " — " + $next_epic.title + ". See workflow run logs."), skip to ##Final."""
 
 _DEFAULT_CLAUSE = """\
 ## Matched clause: `(default)`
@@ -342,25 +346,7 @@ the result.
 >    implement.
 >
 > **Returns:** the `number` and `title` of the next unimplemented epic issue,
-> or `null`.
-
-### extract_epic_from_title(title)
-
-> Parses the issue title to extract the epic identifier string.
->
-> **Input:** `title` — the issue title (e.g. "Epic 3: Repository Layer").
->
-> **Steps:**
-> 1. Epic issues created by gh-issue-tracking-init follow the numbered-title
->    convention `Epic <N>: <Name>` — extract `<N>` and return it as the epic
->    identifier string (e.g. `3`).
-> 2. If the title instead uses the legacy form (e.g. "Epic: Phase 1 — Task 1.2
->    — Data Modeling"), extract the phase number and line_item identifier from
->    the title text and return them as the identifier.
-> 3. If neither form parses, return `null`.
->
-> **Returns:** the epic identifier string suitable for passing to
-> `implement-epic`, or `null`."""
+> or `null`."""
 
 _PUBLISH_VERIFY = """\
 ## Publish & verify

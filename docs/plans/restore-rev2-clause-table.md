@@ -19,11 +19,11 @@ The 2026-10-19 forensic finding (memory, Current Activity): the `gh-issue-tracki
 | Trigger | Clause (provenance) | Publishes |
 |---|---|---|
 | `gh-issue-tracking:direct-body` | run the issue body verbatim inside the ported status/board-link/publish&verify/close mechanics (reference :313-367); sender allowlist gate unchanged in `filters.py` | the body's outcome — e.g. `/gh-issue-tracking-init` applies `init-success` to the Plan issue |
-| `gh-issue-tracking:init-success` | reference :369-401 verbatim: `find_next_unimplemented_epic()` → `extract_epic_from_title()` → `/orchestrate-dynamic-workflow implement-epic { $epic }` | `gh-issue-tracking:epic-implemented` on that epic |
+| `gh-issue-tracking:init-success` | reference :369-401 with the canonical-contract handoff (Decision 8): `find_next_unimplemented_epic()` → `/orchestrate-dynamic-workflow implement-epic { $epic = $next_epic.number }` | `gh-issue-tracking:epic-implemented` on that epic |
 | `gh-issue-tracking:epic-implemented` + `epic` | the follow-on the reference documents as deferred (:395-399), re-keying rev1 steps 2-4 (:204-272) + the epic-complete loop (:148-176): `review-epic-prs` → `report-progress` (+ action items) → `debrief-and-document` → close epic → **LOOP**: scan → `implement-epic` → apply `epic-implemented`; none left → 🏁 fully implemented, close the Plan issue | the next `epic-implemented`, or the terminal state |
 | anything else gate-matched (incl. ALL rev1 `orchestration:*`, `implementation:*`) | reference `(default)` clause (:403-408) + a rev1-deprecation note | a "no clause matched" status comment, then the turn ends |
 
-Helpers ported as prompt-text procedures (LLM-executed, as in the reference): `postStatusUpdate`, `find_next_unimplemented_epic`, `extract_epic_from_title`. The `test`/`debug` label modes are ported. The rev1-only helpers (`find_next_unimplemented_line_item`, `parse_workflow_dispatch_body`) are not.
+Helpers ported as prompt-text procedures (LLM-executed, as in the reference): `postStatusUpdate`, `find_next_unimplemented_epic`. The `test`/`debug` label modes are ported. Not ported: the rev1-only helpers (`find_next_unimplemented_line_item`, `parse_workflow_dispatch_body`) and `extract_epic_from_title` (retired by Decision 8).
 
 ## 3. Decisions
 
@@ -34,6 +34,7 @@ Helpers ported as prompt-text procedures (LLM-executed, as in the reference): `p
 5. **Memory-graph machinery stripped** (repo rule): the reference's mandatory `search_nodes` startup and memory-write finale were discontinued in this repo (`.agents/rules/tools.md`, 2026-09-12); `##Final` becomes a plain run summary.
 6. **Phase 3 discovery prose dropped** (design): the new-app-vs-existing-feature section and the "decide from live tracking state" progression language are the reversed principle; the direct-body kickoff issue carries explicit instructions instead.
 7. **Smoke surfaces re-keyed to rev2** (design): `acp_smoke` default label → `gh-issue-tracking:init-success` (was deprecated `orchestration:plan-approved`); `scripts/e2e-orchestration.ps1` scenario 1 likewise.
+8. **Epic handoffs carry the epic ISSUE NUMBER** (design; found by the pre-merge probe, verified first-hand against `nam20485/agent-instructions`): the canonical contracts are `implement-epic` `$epic` = "Epic issue object or issue number" (`getepic(15, …)` → issue #15), `review-epic-prs` `$epic` likewise, and `single-workflow` takes `$workflow_assignment` + `$assignment_inputs` (not the reference's flat `$epic = …`). The reference's `extract_epic_from_title` handoff is rev1 legacy — with rev2 numbered titles the `Epic <N>:` ordinal is NOT the issue number (kilo24: Plan #2, epics #3–31), so passing it would resolve the wrong issue or none. The helper is retired; clauses pass `$next_epic.number` / the triggering issue's number, and status text uses `#<number> — <title>`.
 
 ## 4. Tests
 
@@ -42,7 +43,7 @@ The Phase 3 exit criterion is INVERTED: `test_no_next_label_chaining_anywhere_in
 ## 5. Validation & rollout
 
 - Full `validation.ps1` gate (build → scan → test; python pytest + coverage > 85%; e2e simulator).
-- Pre-merge probe: one real-opencode `acp_smoke` on the default init-success envelope — confirms a session receives and follows the clause mechanics, and verifies `/orchestrate-dynamic-workflow` + the agent-instructions modules are reachable from the dispatched session surface.
+- Pre-merge probe: one real-opencode `acp_smoke` on the default init-success envelope. **Result (2026-10-19):** the dispatched session received the clause prompt and engaged it mechanically — quoting the clause's steps verbatim in its reasoning — and surfaced the `$epic` contract ambiguity now fixed by Decision 8. The probe did not reach `end_turn` within the operator's 25-minute bound (the session went meta against the fake `owner/repo` target, whose `gh` lookups cannot succeed); a clean end-to-end probe against a live dispatch repo is the merge-time acceptance step.
 - PR to `development` with milestone + board; merge owner-gated.
 - **Owner-checkout note**: the primary checkout holds an UNTRACKED byte-identical copy of `src/webhook_receiver/orchestration_prompt.jinja2.md`; remove it before pulling this branch's merge or git will refuse the overwrite.
 

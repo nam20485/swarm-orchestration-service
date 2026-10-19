@@ -88,16 +88,17 @@ class TestClauseSelection:
         assert "Matched clause: `gh-issue-tracking:init-success`" in p
         assert "Scanning for next unimplemented epic" in p
         assert "$next_epic = find_next_unimplemented_epic()" in p
-        assert "implement-epic { $epic = $epic_id }" in p
+        # Canonical implement-epic contract: $epic is the epic ISSUE NUMBER.
+        assert "implement-epic { $epic = $next_epic.number }" in p
         # The state machine's next hop is named (chaining is the design now).
         assert 'apply label "gh-issue-tracking:epic-implemented"' in p
 
     def test_epic_implemented_with_epic_co_label_selects_completion_clause(self) -> None:
         p = norm(build_orchestration_prompt(epic_info()))
         assert "Matched clause: `gh-issue-tracking:epic-implemented` + `epic`" in p
-        assert "review-epic-prs { $epic = $implemented_epic }" in p
-        assert "$workflow_assignment = report-progress" in p
-        assert "$workflow_assignment = debrief-and-document" in p
+        assert "review-epic-prs { $epic = $epic_number }" in p
+        assert "$workflow_assignment = report-progress, $assignment_inputs = { epic = $epic_number }" in p
+        assert "$workflow_assignment = debrief-and-document, $assignment_inputs = { epic = $epic_number }" in p
         # Completion marker + loop + terminal state.
         assert "close this epic issue" in p
         assert "Loop: pick the next unimplemented epic" in p
@@ -226,12 +227,20 @@ class TestHelperProcedures:
         assert "If the epic is closed, skip it" in p
         assert "the deprecated rev1 `implementation:complete` label check" in p
 
-    def test_extract_epic_from_title_uses_numbered_convention(self) -> None:
-        p = norm(build_orchestration_prompt(make_info("gh-issue-tracking:init-success")))
-        assert "extract_epic_from_title(title)" in p
-        assert "Epic <N>: <Name>" in p
-        # Legacy rev1 title form kept as fallback.
-        assert "Phase 1 — Task 1.2" in p
+    def test_title_parsing_helper_retired_for_issue_number_handoffs(self) -> None:
+        # The canonical implement-epic / review-epic-prs contract takes the
+        # epic ISSUE NUMBER ("Epic issue object or issue number"); a rev2
+        # `Epic <N>:` title ordinal is NOT the issue number, so the
+        # reference's extract_epic_from_title helper is retired. Found by the
+        # pre-merge real-opencode probe, verified against agent-instructions.
+        for info in (
+            make_info("gh-issue-tracking:init-success"),
+            epic_info(),
+        ):
+            p = build_orchestration_prompt(info)
+            assert "extract_epic_from_title" not in p
+            assert "$epic_id" not in p
+            assert "$implemented_epic" not in p
 
 
 class TestPromptContent:
