@@ -36,14 +36,15 @@ An automated test suite must be maintained.
 - Test Coverage levels must be maintained as new code is added.
 - Test coverage level must be > 85% at all times.
 
-### Pester 5 gotchas (repo-verified)
+### PowerShell & Pester gotchas (repo-verified)
 
-Two PowerShell-testing pitfalls found in this repo's suites — both produce silently-wrong tests, not obvious failures:
+Three PowerShell pitfalls found in this repo's suites and generated scripts — all produce silently-wrong code, not obvious failures:
 
 1. **Never use more than one `BeforeAll` block in a `Describe`.** A second `BeforeAll` breaks `$script:`-scoped variable visibility for the whole block: variables set in the first block read as `$null` inside `It` blocks, so every test relying on them fails with "got $null". Merge setup into a single `BeforeAll` per `Describe` (`BeforeAll` inside nested `Context` blocks is fine).
 2. **Never put markdown code-fence lines (```` ``` ````) inside a double-quoted here-string `@"…"@`.** Backticks are escape characters in double-quoted strings: `` `` `` collapses to one literal backtick and a trailing backtick before a newline becomes a line continuation, silently corrupting the fixture. Use a single-quoted here-string `@'…'@` for any content containing backticks, and interpolate afterwards if needed.
+3. **Never distinguish PowerShell variables by case alone — variable names are case-insensitive.** `$Num` and `$num` are the *same* variable: a regex capture into `$num` silently overwrites a `$Num` hashtable (it becomes an `Int32`), and every later `$Num[...]` lookup fails. When generating or editing pwsh, scan for same-name-different-case pairs and rename one (e.g. `$IssueNum`). Verified live: the 2026-10-23 charlie68 `gh-issue-tracking-init` dispatch died mid-apply on exactly this — the generated driver's `$Num` map was clobbered by the `$num` issue-number capture in `07-execution.ps1`.
 
-Symptom signature for (1): every test in one `Describe` fails with `Cannot bind argument to parameter 'Path' because it is null` (or similar `$null`-binding errors) while the `BeforeAll` visibly assigns the variable.
+Symptom signature for (1): every test in one `Describe` fails with `Cannot bind argument to parameter 'Path' because it is null` (or similar `$null`-binding errors) while the `BeforeAll` visibly assigns the variable. Signature for (3): a hashtable variable suddenly behaving as a scalar (`$Num[...]` returns nothing / "Cannot index into a null array" style errors) right after a capture into the same name with different case.
 
 ### Test Driven Development (TDD)
 
