@@ -1,3 +1,4 @@
 {"id":1,"ts":"2026-10-24 09:10:49","action":"issue_created","ref":"pair-om71","summary":"S4: receiver knobs — prompt timeout + idle watchdog for long workflows","branch":"main"}
 {"id":2,"ts":"2026-10-24 09:10:50","action":"issue_created","ref":"pair-5amm","summary":"S5: verification — fresh relabel e2e on a newly stamped clone","branch":"main"}
 {"id":3,"ts":"2026-10-24 09:10:51","action":"issue_created","ref":"pair-7zjb","summary":"S3: migrate or retire the existing v1-stamped clone fleet","branch":"main"}
+{"id":4,"ts":"2026-10-24 09:10:51","action":"issue_created","ref":"pair-57df","summary":"S2: credential strategy for dispatched sessions (env facade vs auth.json)","branch":"main"}
