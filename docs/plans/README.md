@@ -8,7 +8,6 @@ Two states, two places:
     executes on owner direction once the new listener has the Caddy route and
     has soaked.
   - [`charlie68-incident-followups.md`](charlie68-incident-followups.md) —
-<<<<<<< HEAD
     DECIDED 2026-10-24, ready for implementation (D1 a+b driver liveness +
     chunking; D2 = migration S1 with `zai-coding-plan/glm-5.3`; D3 template
     case-guard; D4 canary; D6 autonomous PR cycle — 3-round budget, green +
