@@ -1,0 +1,32 @@
+# pair-template: 0.47.0 prod
+# SQLite database (local cache, rebuilt from JSONL)
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+
+# Local network settings (per-instance)
+network.json
+
+# External sync state (local-only)
+sync-state.json
+
+# Journal reply context (ephemeral, per-session)
+.journal-reply-context
+
+# Journal reply targets (ephemeral, per-session — never persisted to the tracker)
+.journal-reply-target-*
+
+# Orchestration runtime artifacts (pair-1shw.6.2): materialized template, enforce
+# hook, replay logs and scope files. All regenerated at bootstrap from embedded
+# sources, so never versioned.
+orchestration/
+orchestration-dev/
+
+# File bus for sandboxed agents (pair-doty/pair-aj4w): outbound events + delivery
+# acks, written by the sandboxed CLI and consumed/deleted by the app. Transient,
+# never versioned.
+outbox/
+outbox-ack/
+outbox-dev/
+outbox-ack-dev/
