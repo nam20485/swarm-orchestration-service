@@ -7,6 +7,11 @@ Two states, two places:
   - [`old-stack-decommission.md`](old-stack-decommission.md) — PLAN ONLY;
     executes on owner direction once the new listener has the Caddy route and
     has soaked.
+  - [`charlie68-incident-followups.md`](charlie68-incident-followups.md) —
+    PROPOSED; six decision items (D1–D6) out of the 2026-10-23 charlie68
+    incident: driver liveness vs the idle watchdog (sequence-blocking), model
+    pin governance, template skill guard, opencode binary canary, commit
+    hygiene, pipeline continuation.
   - [`grandparent-upstream-graft.md`](grandparent-upstream-graft.md) — PARKED,
     trigger-gated (only when something is needed from the grandparent repo).
   - [`turing-alpha-bot-account.md`](turing-alpha-bot-account.md) — PROPOSED;
