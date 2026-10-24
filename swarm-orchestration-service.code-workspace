@@ -4,5 +4,14 @@
 			"path": "."
 		}
 	],
-	"settings": {}
+	"settings": {
+		"dotrush.roslyn.projectOrSolutionFiles": [
+			"/home/nam20485/src/github/nam20485/swarm-orchestration-service/src/SwarmSandbox/SwarmSandbox.sln",
+			"/home/nam20485/src/github/nam20485/swarm-orchestration-service/src/SwarmSandbox/SwarmSandbox.Api/SwarmSandbox.Api.csproj",
+			"/home/nam20485/src/github/nam20485/swarm-orchestration-service/src/SwarmSandbox/SwarmSandbox.AppHost/SwarmSandbox.AppHost.csproj",
+			"/home/nam20485/src/github/nam20485/swarm-orchestration-service/src/SwarmSandbox/SwarmSandbox.ServiceDefaults/SwarmSandbox.ServiceDefaults.csproj",
+			"/home/nam20485/src/github/nam20485/swarm-orchestration-service/src/SwarmSandbox/SwarmSandbox.Tests/SwarmSandbox.Tests.csproj",
+			"/home/nam20485/src/github/nam20485/swarm-orchestration-service/src/SwarmSandbox/SwarmSandbox.Web/SwarmSandbox.Web.csproj"
+		]
+	}
 }
