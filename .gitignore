@@ -79,3 +79,4 @@ TestResults/
 
 # swarm telemetry run artifact (created/appended by swarm-analyst; never committed)
 docs/swarm-metrics.md
+.pair/
