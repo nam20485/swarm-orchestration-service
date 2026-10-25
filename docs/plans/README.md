@@ -7,6 +7,18 @@ Two states, two places:
   - [`old-stack-decommission.md`](old-stack-decommission.md) — PLAN ONLY;
     executes on owner direction once the new listener has the Caddy route and
     has soaked.
+  - [`charlie68-incident-followups.md`](charlie68-incident-followups.md) —
+    DECIDED 2026-10-24, ready for implementation (D1 a+b driver liveness +
+    chunking; D2 = migration S1 with `zai-coding-plan/glm-5.3`; D3 template
+    case-guard; D4 canary; D6 autonomous PR cycle — 3-round budget, green +
+    zero-threads merge). Out of the 2026-10-23 charlie68 incident.
+  - [`rev2-state-map-design.md`](rev2-state-map-design.md) — IN OWNER
+    FEEDBACK (final pass pending): the C-design orchestration prompt — one
+    compact rev2 state map + canonical contracts replacing the vague Phase-3
+    directions (mechanical knowledge, dynamic execution), absorbing D6's
+    autonomous PR cycle, adding durable memory/rules division of labor, and
+    sequencing Stages 0–5 across the charlie68 follow-ups. Supersedes PR
+    #53's mechanical design (kept for posterity).
   - [`grandparent-upstream-graft.md`](grandparent-upstream-graft.md) — PARKED,
     trigger-gated (only when something is needed from the grandparent repo).
   - [`turing-alpha-bot-account.md`](turing-alpha-bot-account.md) — PROPOSED;
