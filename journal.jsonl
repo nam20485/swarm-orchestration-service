@@ -2,3 +2,4 @@
 {"id":2,"ts":"2026-10-26 22:05:58","action":"issue_created","ref":"pair-wc4j","summary":"S5: verification — fresh relabel e2e on a newly stamped clone","branch":"development"}
 {"id":3,"ts":"2026-10-26 22:05:58","action":"issue_created","ref":"pair-d5an","summary":"S3: migrate or retire the existing v1-stamped clone fleet","branch":"development"}
 {"id":4,"ts":"2026-10-26 22:05:58","action":"issue_created","ref":"pair-ap1v","summary":"S2: credential strategy for dispatched sessions (env facade vs auth.json)","branch":"development"}
+{"id":5,"ts":"2026-10-26 22:05:59","action":"issue_created","ref":"pair-b54r","summary":"S1: stamp v2-shaped config from the template + launcher (root opencode.json)","branch":"development"}
