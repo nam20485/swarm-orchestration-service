@@ -1,1 +1,2 @@
 {"id":1,"ts":"2026-10-26 22:05:57","action":"issue_created","ref":"pair-aowf","summary":"S4: receiver knobs — prompt timeout + idle watchdog for long workflows","branch":"development"}
+{"id":2,"ts":"2026-10-26 22:05:58","action":"issue_created","ref":"pair-wc4j","summary":"S5: verification — fresh relabel e2e on a newly stamped clone","branch":"development"}
