@@ -79,3 +79,7 @@ TestResults/
 
 # swarm telemetry run artifact (created/appended by swarm-analyst; never committed)
 docs/swarm-metrics.md
+
+# local-only tool state and in-progress site work (never committed)
+.pair/
+site/
