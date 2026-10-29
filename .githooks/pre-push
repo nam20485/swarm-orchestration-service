@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Repo-scope pre-push hook (activated via core.hooksPath=.githooks — see pre-commit header).
+# Advisory locally; CI + branch protection are the hard gates.
+#   - signing: WARN for every unsigned (N) commit in the pushed range.
+#   - branch guard: WARN on direct pushes to trunk (development/main).
+#   - merge-gate reminder: merges only on an explicitly-read green CI conclusion,
+#     issued as a standalone command (SC4).
+# Escape hatch: `git push --no-verify` — CI signature check is the backstop.
+set -uo pipefail
+
+say() { printf 'pre-push: %s\n' "$*" >&2; }
+
+remote="${1:-origin}"
+say "SC4 merge gate: merge only on an explicitly-read green conclusion (conclusion == success),"
+say "    issued as its own standalone command — never chained after 'gh run watch' or a status query."
+
+zeros='0000000000000000000000000000000000000000'
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ "$local_sha" = "$zeros" ] && continue # branch deletion push — nothing to inspect
+  branch="${remote_ref#refs/heads/}"
+  case "$branch" in
+    development | main | master)
+      say "WARNING — direct push to trunk '$branch' on '$remote'. Prefer a PR branch (source-control.md § Branching/Pull Requests)."
+      ;;
+  esac
+  if [ "$remote_sha" = "$zeros" ]; then
+    range="$local_sha --not --remotes=$remote"
+  else
+    range="$remote_sha..$local_sha"
+  fi
+  # shellcheck disable=SC2086
+  unsigned="$(git rev-list $range 2>/dev/null | while read -r c; do
+    st="$(git log -1 --format='%G?' "$c" 2>/dev/null)"
+    [ "$st" = "N" ] && printf '%s ' "$c"
+  done)"
+  if [ -n "${unsigned// /}" ]; then
+    say "WARNING — unsigned commits being pushed to '$branch': $unsigned"
+    say "          CI verifies PR-introduced commit signatures; branch protection requires signed commits."
+  fi
+done
+
+exit 0

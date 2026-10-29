@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# Repo-scope pre-commit hook (activated by `git config core.hooksPath .githooks` —
+# validation.ps1 Step-Build and the clone-mint pipeline set it; core.hooksPath is
+# local git config and never travels with the tree, so every clone needs activation).
+#
+# Advisory-by-design locally; the hard gates live in CI + branch protection:
+#   - signing: WARN if commit.gpgsign is not true. Never blocks — the SwarmSandbox
+#     keyless ephemeral workspaces deliberately commit with `-c commit.gpgsign=false`
+#     (see .agents/rules/source-control.md § Commit signing).
+#   - branch naming: BLOCK only clearly-invalid names; warn on convention misses.
+#   - gitleaks: staged-content scan, BLOCKING when gitleaks is installed.
+# Escape hatch: `git commit --no-verify` skips this hook — CI is the backstop.
+set -uo pipefail
+
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+say() { printf 'pre-commit: %s\n' "$*" >&2; }
+
+# --- SC reminders (source-control.md) ---
+say "SC1/SC2: validation.ps1 must have passed and /safe-commit run before this commit."
+say "SC4: merges, remote-branch deletions, and force-pushes are STANDALONE commands — never chained."
+
+# --- Commit signing (advisory) ---
+gpgsign="$(git config --get commit.gpgsign 2>/dev/null || true)"
+case "$(printf '%s' "$gpgsign" | tr '[:upper:]' '[:lower:]')" in
+  true | yes | 1) ;;
+  *)
+    say "WARNING — commit.gpgsign is '${gpgsign:-unset}': this commit will be UNSIGNED."
+    say "          CI verifies PR-commit signatures and branch protection requires signed commits."
+    say "          (Keyless ephemeral sandboxes are the documented exception — see source-control.md.)"
+    ;;
+esac
+
+# --- Branch naming (SC8: <base-prefix>/<branch-name>, e.g. mn/ or dev/) ---
+branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || echo '')"
+if [ -n "$branch" ]; then
+  case "$branch" in
+    development | main | master) ;; # trunk branches are fine
+    *)
+      # Block only clearly-invalid names (git-check-ref-invalid patterns / case / whitespace).
+      if printf '%s' "$branch" | grep -qE '[[:upper:]]|[[:space:]~^:?*\[\\]|\.\.|@\{|//|^\./|\.$|\.lock$'; then
+        say "ERROR — branch name '$branch' is clearly invalid (uppercase, whitespace, ~^:?*[\\, '..', '@{', '//', trailing '.lock')."
+        exit 1
+      fi
+      if ! printf '%s' "$branch" | grep -qE '^[a-z][a-z0-9-]*/[a-z0-9][a-z0-9._/-]*$'; then
+        say "WARNING — branch '$branch' does not follow '<prefix>/<name>' (e.g. mn/feature, dev/fix) — see source-control.md § Branching."
+      fi
+      ;;
+  esac
+fi
+
+# --- gitleaks staged scan (blocking when available) ---
+if command -v gitleaks >/dev/null 2>&1; then
+  if ! gitleaks git --pre-commit --staged --redact "$repo_root" >&2; then
+    say "ERROR — gitleaks found secrets in staged content. Commit blocked."
+    exit 1
+  fi
+fi
+
+exit 0
