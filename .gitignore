@@ -63,8 +63,11 @@ htmlcov/
 Thumbs.db
 desktop.ini
 
-# Qwen Code agent session state
-.qwen/
+# Qwen Code agent session state — `.qwen/rules/` is the exception: the
+# path-gated pointer rules are committed repo assets (L2 gates, see
+# docs/plans/rules-enforcement.md), everything else under .qwen/ stays local.
+.qwen/*
+!.qwen/rules/
 
 # Agent swarm run state (per-run, local only)
 .swarm/
