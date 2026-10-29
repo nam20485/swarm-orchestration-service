@@ -48,6 +48,32 @@ Rules dictate coding conventions, tools, validation, testing, source control, de
 When relocating content into a rules file, the AGENTS.md section that replaces it should become a two-part brief: 1. **Title**: a title describing the type of content the linked file holds (not just its subject name)
 2. **Summary**: a summary previewing the 1–2 most important actual items from the file, abbreviated in-context.
 
+### Critical rules (read before acting)
+
+Hard invariants — in force always, no rule-file lookup needed:
+
+1. **Commits are signed.** `commit.gpgsign = true` is set in the user's `~/.gitconfig`; never pass `--no-gpg-sign` and never disable signing. CI verifies signatures on PR-introduced commits and branch protection requires signed commits. Sole exception: keyless ephemeral sandbox scripts commit with `-c commit.gpgsign=false` (see [`.agents/rules/source-control.md`](.agents/rules/source-control.md) § Commit signing).
+2. **Merge only on an explicitly-read green conclusion.** Read the head branch's CI `conclusion == success`, then issue the merge as its own standalone command — never chained after `gh run watch` or a status query (a query that prints "failure" still exits 0).
+3. **Destructive git operations are standalone commands.** Remote branch deletion, force-push, history rewrite, stash drop: state intent and consequence immediately before execution; never combine with `&&`, `;`, or `|`.
+
+Mandatory reads — before acting on the subject, open the rule file:
+
+| When the task touches… | Read first |
+| --- | --- |
+| commits, pushes, branches, PRs, merges | [`.agents/rules/source-control.md`](.agents/rules/source-control.md) |
+| tests, coverage, validation | [`.agents/rules/validation.md`](.agents/rules/validation.md) |
+| writing or changing scripts/code | [`.agents/rules/coding-style.md`](.agents/rules/coding-style.md) |
+| creating or changing skills | [`.agents/rules/skills.md`](.agents/rules/skills.md) |
+| CI workflows or `validation.ps1` | [`.agents/rules/ci-cd.md`](.agents/rules/ci-cd.md) |
+
+<!-- critical-core:end -->
+
+Repo-local addendum (below the delimiter; not part of the shared core block):
+
+| When the task touches… | Read first |
+| --- | --- |
+| `.zcode/**` or `.opencode/agents/**` | [`.agents/rules/zcode-config.md`](.agents/rules/zcode-config.md) |
+
 ### Updating Memory and Rules
 
 **ALWAYS update as you go — never wait until you are done with all work.**
