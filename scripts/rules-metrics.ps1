@@ -31,15 +31,23 @@
   a logged read of its file in the same session, plus any negative-control token (which must never
   appear at all).
 
+.PARAMETER Enforce
+  Advisory exit code: exit 1 when any CRITICAL rule file was never read in the window, or when
+  -AuditFabrication found unsupported/decoy appearances. Scope honesty: this judges
+  Qwen-sessions-on-this-machine only — other clients are unobservable here; real enforcement
+  lives in the PreToolUse gate + CI, not in this report.
+
 .EXAMPLE
   pwsh scripts/rules-metrics.ps1
   pwsh scripts/rules-metrics.ps1 -Days 7 -AuditFabrication
+  pwsh scripts/rules-metrics.ps1 -Days 7 -Enforce
 #>
 [CmdletBinding()]
 param(
   [string] $Repo = (Split-Path -Parent $PSScriptRoot),
   [double] $Days = 1,
   [switch] $AuditFabrication,
+  [switch] $Enforce,
   [string[]] $ExcludedSession = @(),
   [string] $MetricsDir = "$HOME/.qwen/metrics",
   [string] $Registry = "$HOME/.qwen/metrics/canary-registry.json"
@@ -104,6 +112,18 @@ $ruleRoot = Join-Path $repoPath '.agents/rules'
 $registryObj = $null
 if (Test-Path -LiteralPath $Registry) { $registryObj = Get-Content -LiteralPath $Registry -Raw | ConvertFrom-Json }
 
+# Per-repo critical map: registry "critical" object, repo-name key (leaf of the repo path).
+# Values are rule-file basenames whose NEVER READ status is an actionable finding, not an
+# expectation. Missing key / missing file is existence-guarded: a critical entry absent from
+# a repo's corpus reports `critical-absent` and never trips -Enforce (the parent template
+# carries a smaller corpus than this repo — no false alarms across the lineage).
+$criticalFiles = @()
+$repoName = Split-Path $repoPath -Leaf
+if ($registryObj -and $registryObj.PSObject.Properties['critical']) {
+  $critEntry = $registryObj.critical.PSObject.Properties[$repoName]
+  if ($critEntry) { $criticalFiles = @($critEntry.Value) }
+}
+
 Write-Host "`n== Rule files under .agents/rules : consulted vs never read =="
 $rows = @()
 if (Test-Path -LiteralPath $ruleRoot) {
@@ -115,19 +135,22 @@ if (Test-Path -LiteralPath $ruleRoot) {
         $val = $registryObj.rules.PSObject.Properties[$rel]
         if ($val) { $canary = $val.Value }
       }
+      $isCritical = $criticalFiles -contains (Split-Path $rel -Leaf)
       [pscustomobject]@{
         Rule     = $rel
         Canary   = $canary
+        Crit     = if ($isCritical) { 'CRIT' } else { '' }
         Reads    = $hits.Count
         Sessions = (@($hits | ForEach-Object { if ($_.PSObject.Properties['session']) { $_.session } } | Sort-Object -Unique)).Count
         LastRead = if ($hits.Count) { (($hits | ForEach-Object { [datetime]$_.ts } | Sort-Object)[-1]).ToString('MM-dd HH:mm') } else { '-' }
-        Status   = if ($rel -like '*unreferenced*') { 'DECOY(must stay unread)' } elseif ($hits.Count) { 'consulted' } else { 'NEVER READ' }
+        Status   = if ($rel -like '*unreferenced*') { 'DECOY(must stay unread)' } elseif ($hits.Count) { 'consulted' } elseif ($isCritical) { '!! CRITICAL NEVER READ' } else { 'NEVER READ' }
       }
     })
 }
 $rows | Format-Table -AutoSize -Wrap
 
 $neverRead = @($rows | Where-Object { $_.Status -eq 'NEVER READ' })
+$criticalNeverRead = @($rows | Where-Object { $_.Status -eq '!! CRITICAL NEVER READ' })
 $consulted = @($rows | Where-Object { $_.Status -eq 'consulted' })
 # Decoy untouched-ness must come from the decoy rows' own Reads column: decoys
 # never enter the consulted/NEVER READ buckets, so a subtraction over statuses
@@ -136,11 +159,22 @@ $consulted = @($rows | Where-Object { $_.Status -eq 'consulted' })
 $decoyRows = @($rows | Where-Object { $_.Status -like 'DECOY*' })
 $decoyRead = @($decoyRows | Where-Object { $_.Reads -gt 0 })
 $decayed = $decoyRows.Count - $decoyRead.Count
-if ($consulted.Count + $neverRead.Count -gt 0) {
-  $rate = [math]::Round(100.0 * $consulted.Count / ($consulted.Count + $neverRead.Count), 1)
+# Critical files named in the registry but absent from this repo's corpus: report,
+# never enforce (existence guard — the parent template carries fewer rule files).
+$criticalPresent = @($rows | Where-Object { $_.Crit -eq 'CRIT' } | ForEach-Object { Split-Path $_.Rule -Leaf })
+$criticalAbsent = @($criticalFiles | Where-Object { $criticalPresent -notcontains $_ })
+if ($consulted.Count + $neverRead.Count + $criticalNeverRead.Count -gt 0) {
+  $rate = [math]::Round(100.0 * $consulted.Count / ($consulted.Count + $neverRead.Count + $criticalNeverRead.Count), 1)
   Write-Host "`nconsult breadth   : $rate % of TOC-listed rule files read at least once in window"
   Write-Host "never read        : $($neverRead.Count)  ->  $(($neverRead | ForEach-Object { Split-Path $_.Rule -Leaf }) -join ', ')"
   Write-Host "decoys untouched  : $decayed"
+  if ($criticalNeverRead.Count) {
+    $msg = "!! CRITICAL NEVER READ: $($criticalNeverRead.Count)  ->  $(($criticalNeverRead | ForEach-Object { Split-Path $_.Rule -Leaf }) -join ', ')"
+    if ($Enforce) { Write-Host $msg -ForegroundColor Red } else { Write-Host $msg -ForegroundColor Yellow }
+  }
+  if ($criticalAbsent.Count) {
+    Write-Host "critical-absent   : $($criticalAbsent.Count) named critical but not in this repo's corpus ->  $($criticalAbsent -join ', ')" -ForegroundColor DarkGray
+  }
   if ($decoyRead.Count) {
     Write-Host "!! DECOY READ     : $($decoyRead.Count)  ->  $(($decoyRead | ForEach-Object { Split-Path $_.Rule -Leaf }) -join ', ')" -ForegroundColor Yellow
   }
@@ -154,6 +188,7 @@ if ($contam.Count) {
 }
 
 # --- Fabrication audit ---
+$auditFindings = 0
 if ($AuditFabrication) {
   Write-Host "`n== Fabrication audit (transcript scan) =="
   $chatDir = Join-Path $HOME ".qwen/projects/$slug/chats"
@@ -195,6 +230,22 @@ if ($AuditFabrication) {
       }
     if ($tokens.Count -eq 0) { Write-Host '   no canary tokens loaded (registry missing or empty) — transcript scan not run' -ForegroundColor Yellow }
     elseif (-not $findings.Count) { Write-Host '   clean: no canary token appeared in any scanned transcript without a read behind it' }
-    else { $findings | Where-Object { $_.Verdict -ne 'supported' } | Format-Table -AutoSize }
+    else {
+      $bad = @($findings | Where-Object { $_.Verdict -ne 'supported' })
+      $auditFindings = $bad.Count
+      $bad | Format-Table -AutoSize
+    }
   }
+}
+
+# --- Advisory enforcement exit (-Enforce) ---
+# Scope honesty: judges Qwen-sessions-on-this-machine only; the PreToolUse gate + CI are
+# the real enforcers. critical-absent never counts (existence guard).
+if ($Enforce) {
+  $violations = $criticalNeverRead.Count + $decoyRead.Count + $auditFindings
+  if ($violations -gt 0) {
+    Write-Host "`n-Enforce: $violations violation(s) -> exit 1 (advisory; Qwen-on-this-machine scope only)" -ForegroundColor Red
+    exit 1
+  }
+  Write-Host "`n-Enforce: clean -> exit 0" -ForegroundColor Green
 }
