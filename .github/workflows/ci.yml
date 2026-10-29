@@ -39,3 +39,70 @@ jobs:
         with:
           name: coverage-html
           path: coverage-html/
+
+  # Hard gate for the commit-signing invariant (.agents/rules/source-control.md § Commit
+  # signing; local git hooks are advisory and --no-verify escapes them — this is the
+  # backstop). Only PR-introduced / pushed commits are checked, never whole history.
+  # Verification uses the GitHub API (.commit.verification.verified) so GitHub's server-side
+  # keyring decides: user keys AND the web-flow key both verify — audit of origin/development
+  # (2026-10-28, 200 commits): 167 locally-verified signatures, 33 web-flow merge commits
+  # (locally 'E' = key absent, GitHub-side verified), 0 unsigned. Policy: verified=true
+  # passes (G/U/web-flow); anything else (unsigned, bad signature, invalid/expired key) fails.
+  commit-signatures:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Verify signatures over introduced commits
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          zeros="0000000000000000000000000000000000000000"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            shas=$(git rev-list "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}")
+          else
+            before="${{ github.event.before }}"
+            after="${{ github.sha }}"
+            if [ "$before" = "$zeros" ] || ! git cat-file -e "$before^{commit}" 2>/dev/null; then
+              # New branch (or rewritten remote): no trustworthy range — check the tip only.
+              shas=$(git rev-list -n 1 "$after")
+            else
+              shas=$(git rev-list "$before..$after")
+            fi
+          fi
+          if [ -z "$shas" ]; then
+            echo "No introduced commits to check."
+            exit 0
+          fi
+          failed=0
+          for sha in $shas; do
+            verified=$(gh api "repos/${{ github.repository }}/commits/$sha" --jq '.commit.verification.verified')
+            reason=$(gh api "repos/${{ github.repository }}/commits/$sha" --jq '.commit.verification.reason')
+            if [ "$verified" = "true" ]; then
+              echo "OK      ${sha:0:9} ($reason)"
+            else
+              echo "FAILED  ${sha:0:9} ($reason) — commit must be signed; see source-control.md § Commit signing"
+              failed=1
+            fi
+          done
+          exit "$failed"
+
+  # Agent Skills spec compliance for every skill under .agents/skills/ (strict version
+  # pinning per .agents/rules/ci-cd.md: skills-ref==0.1.1, setup-uv by SHA).
+  agent-skills:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+
+      - name: Validate agent skills
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for skill in .agents/skills/*/; do
+            uvx --from skills-ref==0.1.1 agentskills validate "$skill"
+          done
