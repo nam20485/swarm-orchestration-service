@@ -128,6 +128,7 @@ surfaced a genuine fidelity problem.
 - **F4 (issue 1)** — No pre-fix: the e2e free-port walk stays routed to the fresh
   run's Stage 2 service PR, per plan. (Memory + `-Port` workaround already de-risk
   local runs.)
+**NEGATIVE:** I dont want arbitrary behavior and arbitray port numbers being used in the swarm. Swarm is way more important than that MCP serever, so it wins any challenge. Modify the MCP server's sysytemd unit to use a different port, or just disable it. I dont think its being used by anything yet. Then provide me with
 - **F5 (issue 11)** — Replace the lifetime-budget contract with the true semantics:
   total spawns unlimited, bound only on concurrently-running workers.
   - `swarm-state.ps1`: rename `-MaxSubagents`/`maxSubagents` → `-MaxConcurrent`/
@@ -191,6 +192,7 @@ surfaced a genuine fidelity problem.
 
 ```text
 /swarm goal: ALL true —
+
 (1) parent PRs swarm-context#12 (Stage 1) and #13 (Stage 2 parent) verified: all
     present checks GREEN + MERGEABLE + zero unresolved threads, with #13's stamped
     opencode.json pinning zai-coding-plan/glm-5.3 (O1);
