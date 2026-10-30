@@ -135,7 +135,7 @@ if (Test-Path -LiteralPath $ruleRoot) {
         $val = $registryObj.rules.PSObject.Properties[$rel]
         if ($val) { $canary = $val.Value }
       }
-      $isCritical = $criticalFiles -contains (Split-Path $rel -Leaf)
+      $isCritical = $criticalFiles -contains $rel  # registry lists top-level basenames == their rel path; match $rel (not its leaf) so a nested rules/<subdir>/<same-name>.md is never falsely stamped CRIT
       [pscustomobject]@{
         Rule     = $rel
         Canary   = $canary

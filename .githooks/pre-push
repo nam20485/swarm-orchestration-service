@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Language: bash, not the repo-default pwsh — git invokes hooks through its own sh/Git-Bash
+# launcher (see the pre-commit header for the full rationale; coding-style.md exception).
 # Repo-scope pre-push hook (activated via core.hooksPath=.githooks — see pre-commit header).
 # Advisory locally; CI + branch protection are the hard gates.
 #   - signing: WARN for every unsigned (N) commit in the pushed range.

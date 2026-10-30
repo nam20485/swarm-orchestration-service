@@ -91,6 +91,7 @@ function Step-Build {
             $currentHooksPath = (& git -C $repoRoot config --local core.hooksPath 2>$null)
             if ($currentHooksPath -ne '.githooks') {
                 & git -C $repoRoot config --local core.hooksPath '.githooks'
+                if ($LASTEXITCODE -ne 0) { throw "git config --local core.hooksPath '.githooks' failed (exit code $LASTEXITCODE) in $repoRoot." }
             }
             Write-Host ("core.hooksPath = {0}" -f (& git -C $repoRoot config --local core.hooksPath)) -ForegroundColor Gray
         }
