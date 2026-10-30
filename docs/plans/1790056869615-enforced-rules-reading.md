@@ -18,8 +18,8 @@ The rules system is progressive disclosure **by convention only**: AGENTS.md (au
 
 **Owner-cited symptoms, verified:**
 - Push/PR policy: `source-control.md` obligations SC1–SC12 are **prose-only** — zero mechanical backing (no git hooks exist at all: only `.sample` files, no `core.hooksPath`, no husky).
-- **Commit signing**: ON in `~/.gitconfig` (`commit.gpgsign = true`), documented **nowhere** (zero prose, zero enforcement). The exact "agents don't know it" profile. In-repo deliberate exception: `src/SwarmSandbox/scripts/e2e-sandbox.ps1:310` and `sandbox/smoke-test.ps1:111` commit with `-c commit.gpgsign=false` (keyless ephemeral workspaces) — any hard local signing gate must not break these.
-- Propagation is broken too: the `$num`/$Num` case-insensitivity gotcha (found 2026-10-23) never landed in `validation.md`, which still says "Two" pitfalls. `memory.md:12` is its only home.
+- **Commit signing**: ON in `~/.gitconfig` (`commit.gpgsign = true`), documented **nowhere** (zero prose, zero enforcement). The exact "agents don't know it" profile. In-repo deliberate exception: `src/SwarmSandbox/scripts/e2e-sandbox.ps1:310` and `src/SwarmSandbox/sandbox/smoke-test.ps1:111` commit with `-c commit.gpgsign=false` (keyless ephemeral workspaces) — any hard local signing gate must not break these.
+- Propagation is broken too: the `$num`/`$Num` case-insensitivity gotcha (found 2026-10-23) never landed in `validation.md`, which still says "Two" pitfalls. `memory.md:12` is its only home.
 - The parent's AGENTS.md preview **omits the merge-gate line** this repo carries — clones are born without it.
 
 **Tier ladder (compliance strength):**

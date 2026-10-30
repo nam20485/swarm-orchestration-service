@@ -21,7 +21,7 @@ Then evidence bullets: paths read or changed, commands run with verbatim output 
 RULES-READ: <relpath>: sha256(body)[:12] @ <line-count>
 ```
 
-— the first 12 hex chars of the SHA-256 of the file's full body and its line count, computed from the file you actually read (e.g. `pwsh -NoProfile -Command "(Get-FileHash <path> -Algorithm SHA256).Hash.Substring(0,12).ToLower()"` + `(Get-Content <path>).Count`, or `sha256sum`/`wc -l` in bash). The orchestrator verifies each receipt against the file body at verdict time: a missing or mismatched receipt fails the task — a `DONE` without receipts is treated as not-done. Never quote canary tokens or registry contents in a receipt; the digest+line-count is the whole proof.
+— the first 12 hex chars of the SHA-256 of the file's **whole bytes** (the full file as committed, LF-normalized so the digest is checkout-stable — the repo has no `.gitattributes`) and its line count (`wc -l` newline semantics), computed from the file you actually read (e.g. `pwsh -NoProfile -Command "(Get-FileHash <path> -Algorithm SHA256).Hash.Substring(0,12).ToLower()"` + `(Get-Content <path>).Count`, or `sha256sum`/`wc -l` in bash). The orchestrator verifies each receipt against the file at verdict time: a missing or mismatched receipt fails the task — a `DONE` without receipts is treated as not-done. A receipt attests the file was **opened**, not that its rules were obeyed; the verifier still checks the work. Never quote canary tokens or registry contents in a receipt; the digest+line-count is the whole proof.
 
 ## Scope discipline
 
