@@ -4,7 +4,7 @@
     "AGENTS.md",
     ".agents/memory.md",
     ".agents/rules/**/*.md",
-    ".qwen/rules/*.md",
+    ".qwen/rules/**/*.md",
     "docs/*.md"
   ],
   "config": {

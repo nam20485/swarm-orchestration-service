@@ -3,6 +3,8 @@ description: Read the validation and coding-style rules before changing code or 
 paths:
   - 'scripts/**'
   - 'src/**'
+  - 'tests/**'
+  - '.githooks/**'
   - '*.ps1'
   - '*.sh'
 ---

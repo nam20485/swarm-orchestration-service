@@ -1,6 +1,6 @@
 {
   // Pointer-only rule bodies: the injected payload stays minimal by design
-  // (no heading, no rule content — see docs/plans/rules-enforcement.md §5),
+  // (no heading, no rule content — see docs/plans/1790056869615-enforced-rules-reading.md §3 item 13),
   // so MD041 does not apply inside this directory.
   "config": {
     "MD041": false
