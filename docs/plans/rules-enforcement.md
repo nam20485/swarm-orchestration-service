@@ -30,7 +30,7 @@ and until the canary harness existed nothing measured whether they were opened.
   backing. No git hooks existed at all (only `.sample` files, no `core.hooksPath`, no husky).
 - **Commit signing:** ON in `~/.gitconfig` (`commit.gpgsign = true`), documented **nowhere** — the
   exact "agents don't know it" profile. Deliberate in-repo exception:
-  `src/SwarmSandbox/scripts/e2e-sandbox.ps1` and `sandbox/smoke-test.ps1` commit with
+  `src/SwarmSandbox/scripts/e2e-sandbox.ps1` and `src/SwarmSandbox/sandbox/smoke-test.ps1` commit with
   `-c commit.gpgsign=false` (keyless ephemeral workspaces); any signing gate must not break them.
 - **Propagation broken:** the `$num`/`$Num` PowerShell case-insensitivity gotcha (found 2026-10-23)
   never reached `validation.md`, which still said "Two" pitfalls; `memory.md` was its only home.

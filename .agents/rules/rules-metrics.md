@@ -9,7 +9,7 @@ convention was being honored.
 
 ## How it works
 
-Two user-scope hooks (in `~/.qwen/settings.json`, so they fire in every repo *and* in non-repo
+Three user-scope hooks (in `~/.qwen/settings.json`, so they fire in every repo *and* in non-repo
 workspaces) append JSONL to `~/.qwen/metrics/`:
 
 | Event | Handler | Log | Meaning |
@@ -102,7 +102,7 @@ the PreToolUse gate above, not in the reporting script.
 
 ### Swarm-worker read receipts
 
-Worker compliance is proven by **digest receipts**, not canary tokens: per
+Worker read-access is attested by **digest receipts**, not canary tokens (a receipt proves the file was opened, not that its rules were obeyed — the verifier still checks the work): per
 `.agents/rules/swarm-workers.md` § Report contract, every worker report carries
 `RULES-READ: <relpath>: sha256(body)[:12] @ <line-count>` for each rules file its task Constraints
 named, and the king/orchestrator verifies the digest against the file body at verdict time. Tokens
@@ -195,7 +195,7 @@ The point of a day of data is to decide whether prose disclosure suffices:
 **Decision recorded (2026-10-27 measurement → 2026-10-29 rollout).** The 30-day window settled the
 question against prose-only disclosure: AGENTS.md injected 226×, rule bodies read 16× across 6
 sessions, 10 of 20 files never read — including `source-control.md` obligations that were then
-violated while resident. The levers actually pulled, in tier order: the L1 `### Critical rules`
+violated while resident. The levers being pulled, in tier order (L1 lands in this PR; L2/L3 in #55; the gate is machine-scope, live in `warn` on the owner's box): the L1 `### Critical rules`
 section in AGENTS.md (resident in all four clients, AC7-capped ≤ 45 lines / ≤ 2,400 chars);
 path-gated `.qwen/rules/` pointer rules (zero resident cost); the PreToolUse enforcement gate
 above (warn → enforce ladder); repo-scope `.githooks/` + CI signature/skill checks for the

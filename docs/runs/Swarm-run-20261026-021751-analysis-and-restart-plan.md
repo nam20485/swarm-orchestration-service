@@ -69,7 +69,7 @@ surfaced a genuine fidelity problem.
 
 ### B. Found in repo state / narrative by this analysis
 
-1. **[HIGH] PR #13 stamps the wrong model pin.** The root `opencode.json` on
+5. **[HIGH] PR #13 stamps the wrong model pin.** The root `opencode.json` on
    `dev/rev2-stage2-v2-config-stamping` pins top-level `model:
    zai-coding-plan/glm-5.2` (verified via contents API) — the plan's O1 decision and
    Stage 2 Goal require **`zai-coding-plan/glm-5.3`**. Every clone stamped from this
@@ -77,7 +77,7 @@ surfaced a genuine fidelity problem.
    pin. The worker carried the template's existing 5.2 pin instead of stamping O1's
    5.3; the cross-session memory even records "template's glm-5.2 pin kept" as a
    neutral fact, unrecognized as a defect; the debrief calls the PR merge-ready.
-2. **[MED] Stage 1's done-when is unmet.** PR #12 is SKILL.md guidance only
+6. **[MED] Stage 1's done-when is unmet.** PR #12 is SKILL.md guidance only
    (+61 lines: chunked-apply rules, `Tee-Object` prescription, `$IssueNum` naming, a
    self-contained case-collision audit snippet — well-formed, and guidance is arguably
    the right mechanism since drivers are model-authored from SKILL.md, not
@@ -85,15 +85,15 @@ surfaced a genuine fidelity problem.
    dispatch surviving on `ACP_IDLE_TIMEOUT=300`, and a delegation-quiet run surviving
    — never ran (they require a live dispatch, i.e. post-merge acceptance). "Completed,
    was verified" overstates; this is open acceptance work, not landed fact.
-3. **[LOW] Debrief inaccuracy** — "budget used 5 of 50" vs `state.json` `spawned: 4`.
-4. **[LOW] Uncommitted artifacts in the shared checkout** — the accurate findings
+7. **[LOW] Debrief inaccuracy** — "budget used 5 of 50" vs `state.json` `spawned: 4`.
+8. **[LOW] Uncommitted artifacts in the shared checkout** — the accurate findings
    bullet in `.agents/memory.md` and the untracked `docs/runs/` abort report both need
    a bookkeeping commit.
-5. **[LOW] Stage 3 partial work is at risk** — uncommitted `+122/−49`
+9. **[LOW] Stage 3 partial work is at risk** — uncommitted `+122/−49`
    (`prompt_builder.py`) on a `/tmp` worktree; `/tmp` is volatile across reboots.
-6. **[INFO] #53 posterity untouched** — no pollution; reads only. (Retraction of the
+10. **[INFO] #53 posterity untouched** — no pollution; reads only. (Retraction of the
     mid-run concern, recorded here deliberately.)
-7. **[MED, DESIGN] The skill teaches a false scarcity: `maxSubagents` as a
+11. **[MED, DESIGN] The skill teaches a false scarcity: `maxSubagents` as a
     non-renewing lifetime budget.** Owner-corrected semantics (2026-10-26): total
     subagent spawns are NOT a limited count — the only real bound is on
     simultaneously-running workers. Yet the swarm skill states and *enforces* the
