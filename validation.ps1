@@ -82,6 +82,21 @@ function Test-CommandAvailable {
 function Step-Build {
     Write-Host "`n=== BUILD ===" -ForegroundColor Cyan
 
+    # Activate repo-scope git hooks (idempotent). core.hooksPath is local git config and
+    # never travels with the tree, so every clone/worktree needs it set; echo the current
+    # value either way so a clobber is visible. Advisory hooks only — CI is the hard gate.
+    if ((Test-Path (Join-Path $repoRoot '.githooks')) -and (Test-CommandAvailable 'git')) {
+        $insideWorkTree = (& git -C $repoRoot rev-parse --is-inside-work-tree 2>$null)
+        if ($insideWorkTree -eq 'true') {
+            $currentHooksPath = (& git -C $repoRoot config --local core.hooksPath 2>$null)
+            if ($currentHooksPath -ne '.githooks') {
+                & git -C $repoRoot config --local core.hooksPath '.githooks'
+                if ($LASTEXITCODE -ne 0) { throw "git config --local core.hooksPath '.githooks' failed (exit code $LASTEXITCODE) in $repoRoot." }
+            }
+            Write-Host ("core.hooksPath = {0}" -f (& git -C $repoRoot config --local core.hooksPath)) -ForegroundColor Gray
+        }
+    }
+
     if (-not (Test-CommandAvailable 'markdownlint-cli2')) {
         throw "markdownlint-cli2 not found. Install: npm install -g markdownlint-cli2"
     }

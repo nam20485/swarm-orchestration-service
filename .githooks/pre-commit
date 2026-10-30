@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# Language: bash, not the repo-default pwsh — git invokes hooks through its own sh/Git-Bash
+# launcher, and requiring pwsh on PATH would break hookless containers/sandboxes (this is the
+# exception note coding-style.md §"Reach for another language" asks scripts to carry).
+# Repo-scope pre-commit hook (activated by `git config core.hooksPath .githooks` —
+# validation.ps1 Step-Build and the clone-mint pipeline set it; core.hooksPath is
+# local git config and never travels with the tree, so every clone needs activation).
+#
+# Advisory-by-design locally; the hard gates live in CI + branch protection:
+#   - signing: WARN if commit.gpgsign is not true. Never blocks — the SwarmSandbox
+#     keyless ephemeral workspaces deliberately commit with `-c commit.gpgsign=false`
+#     (see .agents/rules/source-control.md § Commit signing).
+#   - branch naming: BLOCK only clearly-invalid names; warn on convention misses.
+#   - gitleaks: staged-content scan, BLOCKING when gitleaks is installed.
+# Escape hatch: `git commit --no-verify` skips this hook — CI is the backstop.
+set -uo pipefail
+
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+say() { printf 'pre-commit: %s\n' "$*" >&2; }
+
+# --- SC reminders (source-control.md) ---
+say "SC1/SC2: validation.ps1 must have passed and /safe-commit run before this commit."
+say "SC4: merges, remote-branch deletions, and force-pushes are STANDALONE commands — never chained."
+
+# --- Commit signing (advisory) ---
+gpgsign="$(git config --get commit.gpgsign 2>/dev/null || true)"
+case "$(printf '%s' "$gpgsign" | tr '[:upper:]' '[:lower:]')" in
+  true | yes | on | 1) ;;
+  *)
+    say "WARNING — commit.gpgsign is '${gpgsign:-unset}': this commit will be UNSIGNED."
+    say "          CI verifies PR-commit signatures and branch protection requires signed commits."
+    say "          (Keyless ephemeral sandboxes are the documented exception — see source-control.md.)"
+    ;;
+esac
+
+# --- Branch naming (SC8: <base-prefix>/<branch-name>, e.g. mn/ or dev/) ---
+branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || echo '')"
+if [ -n "$branch" ]; then
+  case "$branch" in
+    development | main | master) ;; # trunk branches are fine
+    *)
+      # Block only names git itself rejects — `git check-ref-format` is the authority. Uppercase
+      # is git-VALID (e.g. Release/1.2), so it is a convention WARNING below, never a block.
+      if ! git check-ref-format --branch "$branch" >/dev/null 2>&1; then
+        say "ERROR — branch name '$branch' is not a valid git ref (git check-ref-format)."
+        exit 1
+      fi
+      if ! printf '%s' "$branch" | grep -qE '^[a-z][a-z0-9-]*/[a-z0-9][a-z0-9._/-]*$'; then
+        say "WARNING — branch '$branch' does not follow the lowercase '<prefix>/<name>' convention (e.g. mn/feature, dev/fix) — see source-control.md § Branching."
+      fi
+      ;;
+  esac
+fi
+
+# --- gitleaks staged scan (BLOCK on a real leak; WARN-only on a scanner error) ---
+# gitleaks v8 exits 1 when it finds leaks; any OTHER non-zero is a scanner failure (a gitleaks
+# too old for `git --pre-commit`, an unborn HEAD, an unreadable config). Fail-closed only on a
+# genuine detection: a scanner error must not freeze every commit (safe-commit forbids the
+# --no-verify escape), so warn + allow and let the CI secret scan be the backstop.
+if command -v gitleaks >/dev/null 2>&1; then
+  gl_out="$(gitleaks git --pre-commit --staged --redact "$repo_root" 2>&1)"
+  gl_rc=$?
+  if [ "$gl_rc" -eq 1 ]; then
+    printf '%s\n' "$gl_out" >&2
+    say "ERROR — gitleaks found secrets in staged content. Commit blocked."
+    exit 1
+  elif [ "$gl_rc" -ne 0 ]; then
+    printf '%s\n' "$gl_out" >&2
+    say "WARNING — gitleaks did not run cleanly (exit $gl_rc; e.g. gitleaks <8.19 lacks 'git --pre-commit', or a config error). Commit ALLOWED — the CI secret scan is the backstop."
+  fi
+fi
+
+exit 0

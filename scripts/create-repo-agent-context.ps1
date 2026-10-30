@@ -279,6 +279,28 @@ foreach ($clonePath in $clonePaths) {
     & $modelScript @modelParams
     Write-Host ' done' -ForegroundColor Green
 
+    # Step 3.6: activate repo-scope git hooks (.githooks) when the clone carries them.
+    # core.hooksPath is local git config and never travels with the tree, so every minted
+    # clone needs it set here; validation.ps1 Step-Build re-activates idempotently later.
+    # Guarded by existence: the template only ships .githooks since the rules-enforcement
+    # rollout, so older-template clones simply skip. The hooks are advisory (signing warn,
+    # branch naming, gitleaks-if-present) and must not break the seed-commit amend below.
+    if (-not $DryRun) {
+        Push-Location -LiteralPath $clonePath
+        try {
+            if (Test-Path -LiteralPath '.githooks') {
+                & git config core.hooksPath '.githooks'
+                if ($LASTEXITCODE -ne 0) {
+                    throw "git config core.hooksPath failed (exit code $LASTEXITCODE) in $clonePath."
+                }
+                Write-Host "core.hooksPath = $(& git config core.hooksPath)" -ForegroundColor DarkGray
+            }
+        }
+        finally {
+            Pop-Location
+        }
+    }
+
     # Amend the seed commit to include the cleanup + permission + model changes,
     # then force-push it back over the branch stage 1 pushed: `gh repo create
     # --template` copies only the template's default branch (development for
@@ -296,7 +318,12 @@ foreach ($clonePath in $clonePaths) {
             if ($LASTEXITCODE -ne 0) {
                 throw "git add failed (exit code $LASTEXITCODE) in $clonePath."
             }
-            & git commit --amend --no-edit --message "Seed $repoName from template with plan docs, placeholder replacements, Class-2 cleanup, headless permissions, and stripped model pins"
+            # --no-verify: step 3.6 just activated this clone's hooks; the automated seed amend
+            # must not be blocked by them (a gitleaks scanner error or the branch-name gate would
+            # otherwise abort the mint after the repo already exists). CI is the backstop. The
+            # safe-commit --no-verify ban governs interactive agent commits, not this pipeline's
+            # own seed write.
+            & git commit --amend --no-edit --no-verify --message "Seed $repoName from template with plan docs, placeholder replacements, Class-2 cleanup, headless permissions, and stripped model pins"
             if ($LASTEXITCODE -ne 0) {
                 throw "git commit --amend failed (exit code $LASTEXITCODE) in $clonePath."
             }

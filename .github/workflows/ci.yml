@@ -39,3 +39,83 @@ jobs:
         with:
           name: coverage-html
           path: coverage-html/
+
+  # Hard gate for the commit-signing invariant (.agents/rules/source-control.md § Commit
+  # signing; local git hooks are advisory and --no-verify escapes them — this is the
+  # backstop). Only PR-introduced / pushed commits are checked, never whole history.
+  # Verification uses the GitHub API (.commit.verification.verified) so GitHub's server-side
+  # keyring decides: user keys AND the web-flow key both verify — audit of origin/development
+  # (2026-10-28, 200 commits): 167 locally-verified signatures, 33 web-flow merge commits
+  # (locally 'E' = key absent, GitHub-side verified), 0 unsigned. Policy: verified=true
+  # passes (G/U/web-flow); anything else (unsigned, bad signature, invalid/expired key) fails.
+  commit-signatures:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Verify signatures over introduced commits
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          zeros="0000000000000000000000000000000000000000"
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            shas=$(git rev-list "$BASE_SHA..$HEAD_SHA") || { echo "ERROR — could not enumerate PR-introduced commits ($BASE_SHA..$HEAD_SHA)"; exit 1; }
+          else
+            if [ "$AFTER_SHA" = "$zeros" ]; then
+              echo "Deletion push — nothing to check."; exit 0
+            fi
+            if [ "$BEFORE_SHA" = "$zeros" ] || ! git cat-file -e "$BEFORE_SHA^{commit}" 2>/dev/null; then
+              # New branch (or rewritten remote): no trustworthy range — check the tip only.
+              shas=$(git rev-list -n 1 "$AFTER_SHA") || { echo "ERROR — could not resolve the pushed tip"; exit 1; }
+            else
+              shas=$(git rev-list "$BEFORE_SHA..$AFTER_SHA") || { echo "ERROR — could not enumerate pushed commits ($BEFORE_SHA..$AFTER_SHA)"; exit 1; }
+            fi
+          fi
+          if [ -z "$shas" ]; then
+            echo "No introduced commits to check."
+            exit 0
+          fi
+          failed=0
+          for sha in $shas; do
+            ver_reason=$(gh api "repos/$REPO/commits/$sha" --jq '.commit.verification | "\(.verified)|\(.reason)"' 2>/dev/null || echo "error|api-query-failed")
+            verified="${ver_reason%%|*}"
+            reason="${ver_reason#*|}"
+            if [ "$verified" = "true" ]; then
+              echo "OK      ${sha:0:9} ($reason)"
+            else
+              echo "FAILED  ${sha:0:9} ($reason) — commit must be signed (or the API could not confirm it); see source-control.md § Commit signing"
+              failed=1
+            fi
+          done
+          exit "$failed"
+
+  # Agent Skills spec compliance for every skill under .agents/skills/ (strict version
+  # pinning per .agents/rules/ci-cd.md: skills-ref==0.1.1, setup-uv by SHA).
+  agent-skills:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+
+      - name: Validate agent skills
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          skills=(.agents/skills/*/)
+          if [ ${#skills[@]} -eq 0 ]; then
+            echo "ERROR — no skill directories under .agents/skills/ — the gate would pass vacuously; investigate."
+            exit 1
+          fi
+          for skill in "${skills[@]}"; do
+            uvx --from skills-ref==0.1.1 agentskills validate "$skill"
+          done
