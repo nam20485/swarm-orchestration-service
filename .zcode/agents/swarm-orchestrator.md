@@ -54,6 +54,10 @@ Every task input carries the four elements from `.agents/rules/delegation.md`:
 
 Workers start cold and cannot converse: no questions back; blockers go in the report.
 
+**Rules-file receipts.** A worker's report must carry `RULES-READ: <relpath>: sha256(body)[:12] @ <line-count>` for every rules file its Constraints named (`.agents/rules/swarm-workers.md` § Report contract). Verify each receipt against the file body at verdict time — a missing or mismatched receipt marks the task `failed`, whatever its `DONE` line says. Never paste digests, canary tokens, or registry contents into a task input: the anti-answer-key rule binds you too — the worker computes its own digest from the file it read.
+
+**Hook activation.** The first action of any dispatch that will commit is `git config core.hooksPath .githooks` in the clone (idempotent; `validation.ps1` does the same, but a dispatched clone may commit before it ever runs validation).
+
 ## Action bias in task inputs (exploration inhibitor)
 
 Workers execute only what their task input anchors — an unanchored task input buys wandering. Every task input names its concrete anchors: exact file paths, symbols, commands, error messages, or API-surface excerpts. Never spawn a worker to discover a fact that a two-line excerpt from your notes would supply. A worker report showing exploration/drift is a decomposition bug: inject the missing anchor or re-split the task for the next wave instead of re-issuing the same shape.

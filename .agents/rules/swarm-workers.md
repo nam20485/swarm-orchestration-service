@@ -15,6 +15,14 @@ Your final report's first line is exactly one of:
 
 Then evidence bullets: paths read or changed, commands run with verbatim output tails, findings, sources (file path + line range, or URL). You start cold and cannot converse with the orchestrator — no questions back; blockers go in the report.
 
+**Rules-read receipts (mandatory).** For every rules file your task's Constraints element named, the report includes one line:
+
+```text
+RULES-READ: <relpath>: sha256(body)[:12] @ <line-count>
+```
+
+— the first 12 hex chars of the SHA-256 of the file's **whole bytes** (the full file as committed, LF-normalized so the digest is checkout-stable — the repo has no `.gitattributes`) and its line count (`wc -l` newline semantics), computed from the file you actually read (e.g. `pwsh -NoProfile -Command "(Get-FileHash <path> -Algorithm SHA256).Hash.Substring(0,12).ToLower()"` + `(Get-Content <path>).Count`, or `sha256sum`/`wc -l` in bash). The orchestrator verifies each receipt against the file at verdict time: a missing or mismatched receipt fails the task — a `DONE` without receipts is treated as not-done. A receipt attests the file was **opened**, not that its rules were obeyed; the verifier still checks the work. Never quote canary tokens or registry contents in a receipt; the digest+line-count is the whole proof.
+
 ## Scope discipline
 
 Execute exactly the delegated task, nothing more. Never expand scope, never "fix" unrelated code, never re-run verification commands with changed inputs to force a pass. Stay inside the task's named files and scope; `DONE` only when the Done-when criteria are observably met — a plan to finish does not count.

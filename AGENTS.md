@@ -24,7 +24,7 @@ Memory is the project's durable context, located at `.agents/memory.md`. It has 
 Rules dictate coding conventions, tools, validation, testing, source control, delegation, and work practices. Files live under `.agents/rules/`, one per subject:
 
 - **Tools**: [`.agents/rules/tools.md`](.agents/rules/tools.md) — MCP server inventory, tool-selection decision points, and credential wiring. Core rules: `Z_AI_API_KEY` must hold the **full header value** `Bearer <api-key>`, because opencode substitutes the env var verbatim into `Authorization`; and per-run scratch is namespaced by repo slug under `/tmp/kilo/<repo-slug>/`, never loose in `/tmp/kilo/` — a stale driver hardcodes one repo and silently mis-targets a GitHub-mutating run. Sequential-thinking and the memory knowledge-graph were **discontinued 2026-09-12**: do not call or re-add them.
-- **Validation**: [`.agents/rules/validation.md`](.agents/rules/validation.md) — the mandatory validation gate and test floor for every change. Core rules: validation is `build` → `scan` → `test` run by a maintained `validation.ps1`/`validation.sh` that mirrors CI, and **if that script does not exist you create it and commit it as its own change first** rather than skipping validation; coverage stays **> 85%** at all times. Two Pester 5 traps there fail silently rather than loudly (one `BeforeAll` per `Describe`; no markdown backticks inside a double-quoted here-string).
+- **Validation**: [`.agents/rules/validation.md`](.agents/rules/validation.md) — the mandatory validation gate and test floor for every change. Core rules: validation is `build` → `scan` → `test` run by a maintained `validation.ps1`/`validation.sh` that mirrors CI, and **if that script does not exist you create it and commit it as its own change first** rather than skipping validation; coverage stays **> 85%** at all times. Three Pester/PowerShell traps there fail silently rather than loudly (one `BeforeAll` per `Describe`; no markdown backticks inside a double-quoted here-string; `$Num` and `$num` are the same variable).
 - **Source Control**: [`.agents/rules/source-control.md`](.agents/rules/source-control.md) — commit gates, the merge gate, PR requirements, and review-thread resolution. Core rules: always run the `/safe-commit` skill before committing, and `validation.ps1` before the commit itself; **merge only on an explicitly-read green CI conclusion** (`conclusion == success`) issued as its own standalone command — never chained after `gh run watch` or a status query, because a query that prints "failure" still exits 0 — and delete a merged branch only after post-merge CI on the base is green. Every pull request gets **a milestone and a Projects v2 board assignment**, and all review comments are replied to and marked RESOLVED via GraphQL before merging.
 - **Delegation**: [`.agents/rules/delegation.md`](.agents/rules/delegation.md) — when to delegate and how to brief a delegate. Core rule: a delegate starts cold and cannot see your session, so every non-trivial task input carries four elements — **Goal / Context / Constraints / Done when** — with Constraints *naming* the governing `.agents/rules/` file instead of restating it. Orchestration picks the smallest layer that fits (`orchestrator` / `team-lead` / `team-orchestrator`).
 - **Practices**: [`.agents/rules/practices.md`](.agents/rules/practices.md) — orientation, planning, investigation, and change discipline. Core rules: never guess at a root cause — investigate first-hand logs, code, and output, and do not start a solution until the cause is decisively found; orient via `.agents/memory.md`, existing plans, and `git status`/`git log` **before any work**. On a failing command, diagnose before retrying (max 3 informed attempts, then search the web). ~5 discovery calls without a hypothesis is drift: act from the most concrete anchor.
@@ -48,6 +48,32 @@ Rules dictate coding conventions, tools, validation, testing, source control, de
 When relocating content into a rules file, the AGENTS.md section that replaces it should become a two-part brief: 1. **Title**: a title describing the type of content the linked file holds (not just its subject name)
 2. **Summary**: a summary previewing the 1–2 most important actual items from the file, abbreviated in-context.
 
+### Critical rules (read before acting)
+
+Hard invariants — in force always, no rule-file lookup needed:
+
+1. **Commits are signed.** `commit.gpgsign = true` is set in the user's `~/.gitconfig`; never pass `--no-gpg-sign` and never disable signing. CI verifies signatures on PR-introduced commits and branch protection requires signed commits. Sole exception: keyless ephemeral sandbox scripts commit with `-c commit.gpgsign=false` (see [`.agents/rules/source-control.md`](.agents/rules/source-control.md) § Commit signing).
+2. **Merge only on an explicitly-read green conclusion.** Read the head branch's CI `conclusion == success`, then issue the merge as its own standalone command — never chained after `gh run watch` or a status query (a query that prints "failure" still exits 0).
+3. **Destructive git operations are standalone commands.** Remote branch deletion, force-push, history rewrite, stash drop: state intent and consequence immediately before execution; never combine with `&&`, `;`, or `|`.
+
+Mandatory reads — before acting on the subject, open the rule file:
+
+| When the task touches… | Read first |
+| --- | --- |
+| commits, pushes, branches, PRs, merges | [`.agents/rules/source-control.md`](.agents/rules/source-control.md) |
+| tests, coverage, validation | [`.agents/rules/validation.md`](.agents/rules/validation.md) |
+| writing or changing scripts/code | [`.agents/rules/coding-style.md`](.agents/rules/coding-style.md) |
+| creating or changing skills | [`.agents/rules/skills.md`](.agents/rules/skills.md) |
+| CI workflows or `validation.ps1` | [`.agents/rules/ci-cd.md`](.agents/rules/ci-cd.md) |
+
+<!-- critical-core:end -->
+
+Repo-local addendum (below the delimiter; not part of the shared core block):
+
+| When the task touches… | Read first |
+| --- | --- |
+| `.zcode/**` or `.opencode/agents/**` | [`.agents/rules/zcode-config.md`](.agents/rules/zcode-config.md) |
+
 ### Updating Memory and Rules
 
 **ALWAYS update as you go — never wait until you are done with all work.**
@@ -59,7 +85,7 @@ When relocating content into a rules file, the AGENTS.md section that replaces i
 
 ## Validation
 
-Detailed validation, testing, and TDD rules live in [`.agents/rules/validation.md`](.agents/rules/validation.md). Test coverage must be maintained > 85%. Includes repo-verified Pester 5 gotchas (single `BeforeAll` per `Describe`; no backtick fences inside `@"…"@` here-strings) — read before writing Pester tests. The gate also has a **Python branch** (`validation.ps1 -Step python`: pytest + coverage for `src/webhook_receiver`) and an **e2e branch** (`-Step e2e`: the hermetic `scripts/e2e-orchestration.ps1` simulator smoke); both run in the default `-Step all`.
+Detailed validation, testing, and TDD rules live in [`.agents/rules/validation.md`](.agents/rules/validation.md). Test coverage must be maintained > 85%. Includes repo-verified Pester 5 / PowerShell gotchas (single `BeforeAll` per `Describe`; no backtick fences inside `@"…"@` here-strings; `$Num` and `$num` are one variable) — read before writing Pester tests. The gate also has a **Python branch** (`validation.ps1 -Step python`: pytest + coverage for `src/webhook_receiver`) and an **e2e branch** (`-Step e2e`: the hermetic `scripts/e2e-orchestration.ps1` simulator smoke); both run in the default `-Step all`.
 
 ## CI/CD Pipeline Requirements
 

@@ -12,6 +12,15 @@ When asked to commit the current set of changes in the working copy, always:
 2. Break the changes into conceptual groups.
 3. Commit each group with a meaningful message.
 
+## Commit signing
+
+Commit signing is **on** machine-wide: `commit.gpgsign = true` in the user's `~/.gitconfig`. Every commit an agent makes here is expected to carry a valid signature.
+
+- **Never pass `--no-gpg-sign`** and never set `commit.gpgsign=false` outside the documented exception below. A commit that fails signing should fail loudly — fix the key/agent, do not drop the signature.
+- **Enforcement is mechanical, not prose**: the CI workflow verifies signatures over PR-introduced commits (`G`/`U` pass; `N`/`B` fail — GitHub web-flow merge commits verify after CI imports GitHub's `web-flow.gpg` signing key), and the repository branch protection requires signed commits. A local `--no-verify` or unsigned commit therefore dies at the PR, not at review.
+- **Documented exception — keyless ephemeral workspaces**: `src/SwarmSandbox/scripts/e2e-sandbox.ps1` and `src/SwarmSandbox/sandbox/smoke-test.ps1` commit with `-c commit.gpgsign=false` because their throwaway sandboxes have no GPG key material. That exception is scoped to those scripts; never generalize it.
+- Merge commits created by GitHub's web flow are signed with GitHub's `web-flow` key — that is expected and passes; do not "fix" them.
+
 ## Merge gate (user directive 2026-09-10)
 
 Mechanical brakes on consequential git steps — never batch them into compound commands:

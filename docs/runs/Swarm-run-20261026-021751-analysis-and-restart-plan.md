@@ -93,6 +93,25 @@ surfaced a genuine fidelity problem.
    (`prompt_builder.py`) on a `/tmp` worktree; `/tmp` is volatile across reboots.
 10. **[INFO] #53 posterity untouched** — no pollution; reads only. (Retraction of the
     mid-run concern, recorded here deliberately.)
+11. **[MED, DESIGN] The skill teaches a false scarcity: `maxSubagents` as a
+    non-renewing lifetime budget.** Owner-corrected semantics (2026-10-26): total
+    subagent spawns are NOT a limited count — the only real bound is on
+    simultaneously-running workers. Yet the swarm skill states and *enforces* the
+    opposite in six service-side surfaces plus the parent mirror: the run's
+    "budget used 5 of 50" reporting is the contract working as written, not an agent
+    error. Locations (all verified): `.agents/skills/swarm/SKILL.md` (description,
+    inputs line 15, init, loop bullet, stop conditions, report line),
+    `.agents/skills/swarm/scripts/swarm-state.ps1` (`-MaxSubagents` param, state
+    field, `start-round` `BUDGET EXHAUSTED` hard stop),
+    `.agents/skills/swarm/scripts/tests/SwarmState.Tests.ps1` (exhaustion tests),
+    `.zcode/agents/swarm-orchestrator.md` + `.opencode/agents/swarm-orchestrator.md`
+    (protocol steps 1 and 3), `.agents/skills/swarm-plan/SKILL.md:109` (init
+    invocation), and word-for-word in swarm-context's `SKILL.md` + script + tests.
+    Cost of the false model: orchestrators hoard spawns, report depleting budgets,
+    and a productive run can be hard-stopped at 50 lifetime spawns for no real
+    reason. Removing the stop also removes a runaway-cost brake — the remaining
+    stops (3-fruitless-rounds stall guard, permission-parked workers, owner
+    interrupt) still bound a runaway; owner accepts the trade-off.
 
 ## 3. Corrective actions
 
@@ -109,6 +128,26 @@ surfaced a genuine fidelity problem.
 - **F4 (issue 1)** — No pre-fix: the e2e free-port walk stays routed to the fresh
   run's Stage 2 service PR, per plan. (Memory + `-Port` workaround already de-risk
   local runs.)
+**NEGATIVE:** I dont want arbitrary behavior and arbitray port numbers being used in the swarm. Swarm is way more important than that MCP serever, so it wins any challenge. Modify the MCP server's sysytemd unit to use a different port, or just disable it. I dont think its being used by anything yet. Then provide me with
+- **F5 (issue 11)** — Replace the lifetime-budget contract with the true semantics:
+  total spawns unlimited, bound only on concurrently-running workers.
+  - `swarm-state.ps1`: rename `-MaxSubagents`/`maxSubagents` → `-MaxConcurrent`/
+    `maxConcurrent` (default 50, now a concurrency ceiling); delete the
+    `start-round` `BUDGET EXHAUSTED` stop; keep `spawned` as a cumulative,
+    reporting-only counter.
+  - Tests: exhaustion-stop tests replaced — `start-round` proceeds past any
+    cumulative count; `maxConcurrent` recorded; coverage stays >85%.
+  - `SKILL.md` (swarm): description drops "budget is exhausted"/"max-subagent
+    budget"; inputs line becomes the concurrency ceiling with "total spawns are not
+    limited"; loop bullet becomes a concurrency check; stop conditions lose
+    `BUDGET EXHAUSTED`; report line reports cumulative spawns.
+  - `swarm-plan/SKILL.md:109`: init invocation → `-MaxConcurrent <n>`.
+  - `.zcode/agents/swarm-orchestrator.md` + `.opencode/agents/swarm-orchestrator.md`
+    protocol steps 1/3: drop the budget stop and per-batch `spawned`-ceiling
+    self-enforcement; state "keep simultaneous workers ≤ maxConcurrent".
+  - Mirror word-for-word to swarm-context (`SKILL.md`, script, tests) as a parent PR.
+  - Note (pre-existing drift, out of scope): parent's `.zcode`/`.opencode`
+    orchestrator defs do not carry the budget lines the service copies do.
 
 ### 3.2 Reset state fresh for the next run
 
@@ -137,16 +176,23 @@ surfaced a genuine fidelity problem.
 3. **F3 + R1** — Stage 3 worktree: WIP-commit the partial; rebase onto `development`;
    verify `git log` shows WIP atop `5c88819` with no companion-doc deletion in
    `git diff development...dev/rev2-state-map`; leave unpushed.
-4. **R2** — re-confirm `wt/stage2-service` clean at `5c88819`.
-5. **R5** — hand over the amended fresh-run prompt (goal + context) for firing in
+4. **F5** — concurrency-semantics fix: edit the six service-side surfaces (script,
+   tests, swarm SKILL.md, swarm-plan SKILL.md, both orchestrator protocol bodies);
+   run full `validation.ps1` (Pester rewrites must keep coverage >85%); open service
+   PR to `development`; mirror to swarm-context and open the parent PR. Lands BEFORE
+   the fresh run so the restart reads corrected semantics.
+5. **R2** — re-confirm `wt/stage2-service` clean at `5c88819`.
+6. **R5** — hand over the amended fresh-run prompt (goal + context) for firing in
    ZCode.
-6. **Owner-side (listed, not executed):** review/merge #13 (post-F1) and #12; the D7
-   org-hook check stays parked (clause 8); Stage 1's live done-when runs post-merge.
+7. **Owner-side (listed, not executed):** review/merge #13 (post-F1) and #12; the D7
+   org-hook check stays parked (clause 8); Stage 1's live done-when runs post-merge;
+   review/merge the F5 service + parent PRs.
 
 ## 5. Fresh-run prompt (draft)
 
 ```text
 /swarm goal: ALL true —
+
 (1) parent PRs swarm-context#12 (Stage 1) and #13 (Stage 2 parent) verified: all
     present checks GREEN + MERGEABLE + zero unresolved threads, with #13's stamped
     opencode.json pinning zai-coding-plan/glm-5.3 (O1);

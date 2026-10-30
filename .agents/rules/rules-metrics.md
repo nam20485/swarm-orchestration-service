@@ -9,7 +9,7 @@ convention was being honored.
 
 ## How it works
 
-Two user-scope hooks (in `~/.qwen/settings.json`, so they fire in every repo *and* in non-repo
+Three user-scope hooks (in `~/.qwen/settings.json`, so they fire in every repo *and* in non-repo
 workspaces) append JSONL to `~/.qwen/metrics/`:
 
 | Event | Handler | Log | Meaning |
@@ -17,10 +17,46 @@ workspaces) append JSONL to `~/.qwen/metrics/`:
 | `InstructionsLoaded` | `~/.qwen/hooks/rules-metrics/log-instructions-loaded.sh` | `instructions-loaded.jsonl` | a context file (`AGENTS.md` etc.) was actually injected — proof the TOC was available |
 | `PostToolUse` (`read_file`) | `~/.qwen/hooks/rules-metrics/log-rule-read.sh` | `rule-reads.jsonl` | a rule body was actually read — the obedience signal |
 | same, path match on the registry | — | `registry-contamination.jsonl` | the answer key was read; that session's recitals prove nothing |
+| `PreToolUse` (`run_shell_command`) | `~/.qwen/hooks/rules-metrics/gate-consequential-git.sh` | `consequential-git-attempts.jsonl` | a consequential git/gh command hit the enforcement gate — one row per evaluated command, with its verdict |
 
 Handlers stay **stdout-silent on purpose**: a command hook that exits 0 with plain-text stdout gets
 that text added to the model context (`hooks.md`, "Exit Code Behavior"), which would make the
-observer perturb the observed.
+observer perturb the observed. The gate hook is the single exception by design — its whole job is to
+inject a reminder (`additionalContext`) or a denial, and it speaks only through the documented
+`hookSpecificOutput` JSON.
+
+## Enforcement gate (PreToolUse, Qwen only)
+
+`gate-consequential-git.sh` turns the two most-violated `source-control.md` obligations into
+mechanics. Two independent checks:
+
+1. **Read-gate (oracle: `rule-reads.jsonl`).** `git commit|push|merge` and `gh pr create|merge`
+   require a logged read of `.agents/rules/source-control.md` **this session**. Join key is
+   `(session_id, git-root-canonicalized cwd)` via `git rev-parse --git-common-dir`, so reads logged
+   anywhere in the repo or its worktrees count. Position-anchored regex: `echo "git push"` or
+   `grep 'git commit'` never fires.
+2. **Compound-command block (NO oracle).** `gh pr merge`, `git push --delete`, and force-push
+   (`--force`/`-f`) are denied in **every** phase except `off` when the command string contains
+   `&&`, `;`, `|`, or a `gh run watch|view` prefix — SC4/SC6's standalone-command rule,
+   mechanically checkable without knowing what the model read.
+
+Phase ladder: `RULES_GATE` env, else `~/.qwen/metrics/gate-phase`, else `off`.
+
+| Phase | Read-gate miss | Compound destructive |
+| --- | --- | --- |
+| `off` | hook exits silently | not evaluated |
+| `warn` (capture) | allow + `additionalContext` reminder + `warned` row | **deny** |
+| `enforce` | **deny**, reason names `source-control.md` | **deny** |
+
+Fail-open is **detectable**: any internal error (bad payload, missing `jq`) writes an
+`enforcement-skipped` row and exits 0. Review `consequential-git-attempts.jsonl` for those and for
+misfires before flipping `warn` → `enforce` (the rollout requires ≥ 7 days and zero unexplained
+misfires).
+
+**Coerced reads:** once `enforce` is live, a read of `source-control.md` immediately before a
+previously-denied command is coerced by the gate, not volunteered. Label those sessions in any
+report (`verdict: denied-read-gate` row followed by the read in the same session); `--safe-mode`
+probe sessions remain the uncoerced baseline control.
 
 ## Canaries
 
@@ -47,9 +83,32 @@ pwsh scripts/rules-metrics.ps1 -Days 7 -AuditFabrication
 pwsh scripts/rules-metrics.ps1 -Repo <path> -ExcludedSession <session-id>
 ```
 
-Report columns: per rule file — canary, reads, distinct sessions, last read, and `consulted` vs
-`NEVER READ`; plus context-load counts and consult breadth; with `-AuditFabrication`, also a
-transcript scan that flags any token appearing without a logged read behind it.
+Report columns: per rule file — canary, `Crit` (whether the file is on this repo's critical list),
+reads, distinct sessions, last read, and `consulted` vs `NEVER READ` vs `!! CRITICAL NEVER READ`;
+plus context-load counts and consult breadth; with `-AuditFabrication`, also a transcript scan that
+flags any token appearing without a logged read behind it.
+
+### The `critical` registry key
+
+`~/.qwen/metrics/canary-registry.json` carries a sibling `"critical"` object mapping repo name →
+list of rule-file basenames whose `NEVER READ` status is an actionable finding, not an expectation
+(this repo: `source-control.md`, `validation.md`, `coding-style.md`, `skills.md`, `ci-cd.md`,
+`zcode-config.md`). Values stay plain strings/arrays — do not object-ify the registry; the script
+reads `.rules`/`.negative_controls` as string maps. A critical file **absent** in a repo shows
+`critical-absent` and never trips enforcement (existence-guarded, so the parent template's smaller
+corpus raises no false alarm). `!! CRITICAL NEVER READ` is a yellow advisory; only `-Enforce`
+(advisory exit 1, scoped to Qwen-sessions-on-this-machine) turns it red — real enforcement lives in
+the PreToolUse gate above, not in the reporting script.
+
+### Swarm-worker read receipts
+
+Worker read-access is attested by **digest receipts**, not canary tokens (a receipt proves the file was opened, not that its rules were obeyed — the verifier still checks the work): per
+`.agents/rules/swarm-workers.md` § Report contract, every worker report carries
+`RULES-READ: <relpath>: sha256(body)[:12] @ <line-count>` for each rules file its task Constraints
+named, and the king/orchestrator verifies the digest against the file body at verdict time. Tokens
+stay confined to `.agents/rules` bodies + this Qwen measurement harness; a receipt that quotes a
+token value, or a task input that pastes a digest, is answer-key planting (anti-theater rule — the
+orchestrator computes the expected digest itself).
 
 ## Rules for interpreting the numbers
 
@@ -132,6 +191,18 @@ The point of a day of data is to decide whether prose disclosure suffices:
   frontmatter, so all become baseline — measured at 384 files / ~377 KB ≈ 96k resident tokens. Rule
   bodies there also get no `@import` processing and are `stripHtmlComments`-ed, so an HTML-comment
   canary would vanish — keep canaries where they are.
+
+**Decision recorded (2026-10-27 measurement → 2026-10-29 rollout).** The 30-day window settled the
+question against prose-only disclosure: AGENTS.md injected 226×, rule bodies read 16× across 6
+sessions, 10 of 20 files never read — including `source-control.md` obligations that were then
+violated while resident. The levers being pulled, in tier order (L1 lands in this PR; L2/L3 in #55; the gate is machine-scope, live in `warn` on the owner's box): the L1 `### Critical rules`
+section in AGENTS.md (resident in all four clients, AC7-capped ≤ 45 lines / ≤ 2,400 chars);
+path-gated `.qwen/rules/` pointer rules (zero resident cost); the PreToolUse enforcement gate
+above (warn → enforce ladder); repo-scope `.githooks/` + CI signature/skill checks for the
+non-Qwen clients; digest receipts for swarm workers. Honest framing: this stack enforces
+**exposure, not obedience** — knowledge gaps are fixed by residency, obedience gaps only by the
+mechanical gates. Full analysis and probe matrix:
+`docs/plans/1790056869615-enforced-rules-reading.md` and `docs/plans/rules-enforcement.md`.
 
 ## Baseline at install (2026-09-27)
 
