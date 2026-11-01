@@ -84,20 +84,20 @@ Branch `mn/revert-rules-enforcement` off `origin/development` @ `6aed9c8` (see b
 
 ### Commit 1 — this plan doc
 
-```
+```text
 docs(plans): revert plan for rules-enforcement changes (PRs #54/#55)
 ```
 
 ### Commit 2 — revert PR #55 (order matters: newer merge first)
 
-```
+```bash
 git revert -m 1 6aed9c8
 # default message: Revert "Merge pull request #55 from nam20485/mn/rules-enforcement"
 ```
 
 ### Commit 3 — revert PR #54
 
-```
+```bash
 git revert -m 1 5151ab7
 # default message: Revert "Merge pull request #54 from nam20485/mn/critical-rules-core"
 ```
@@ -106,14 +106,16 @@ git revert -m 1 5151ab7
 
 ### Commit 4 — preservation + memory bookkeeping
 
-```
+```text
 docs: preserve run-history and unrelated memory from the enforcement revert
 ```
 
 1. Restore the two run-history docs to their pre-revert state (keeps the F5 maxSubagents→MaxConcurrent redesign, the owner's port-squatter NEGATIVE directive, review fixes, findings renumbering):
-   ```
+
+   ```bash
    git checkout 6aed9c8 -- docs/runs/Swarm-run-20261026-021751-abort-report.md docs/runs/Swarm-run-20261026-021751-analysis-and-restart-plan.md
    ```
+
 2. Restore `.agents/memory.md` to pre-revert state (keeps the two PaiR/herdr integration entries from `ff9d113`), then edit:
    - rewrite the "Enforced-rules-reading plan implemented end-to-end (2026-10-29…)" entry to past tense: *implemented, then reverted by owner directive 2026-11-01 (this PR) — mechanics removed, see `docs/plans/revert-new-rules-reading-changes.md`*;
    - add a **Decisions** entry: owner directed full revert of the rules-reading enforcement rollout (PRs #54/#55) on 2026-11-01; enforcement returns to convention-only progressive disclosure; run-history docs were deliberately preserved.
@@ -148,11 +150,13 @@ Coverage: no `src/` code is touched by the delta — the >85% floor is unaffecte
 
 ## Done-when (verification checklist)
 
-1. Post-merge `development` tree vs `5c996c3` differs in **exactly** these files: `.opencode/opencode.jsonc` (70b315e), the two preserved `docs/runs/Swarm-run-20261026-021751-*.md` docs, `.agents/memory.md` (PaiR entries + revert records), and this plan doc. Everything else byte-equal:
-   ```
+1. Post-merge `development` tree vs `5c996c3` differs in **exactly** these files: the two preserved `docs/runs/Swarm-run-20261026-021751-*.md` docs, `.agents/memory.md` (PaiR entries + revert records), and this plan doc — plus `.opencode/opencode.jsonc` **only once the local-only `70b315e` lands** (see base note). Everything else byte-equal:
+
+   ```bash
    git diff 5c996c3 origin/development --stat
    git diff 5c996c3 origin/development -- AGENTS.md .githooks .qwen .github scripts/rules-metrics.ps1 scripts/create-repo-agent-context.ps1 validation.ps1 .secretscan-allow .gitignore   # expect empty
    ```
+
 2. `AGENTS.md` at HEAD is byte-identical to `5c996c3:AGENTS.md` (critical-core block gone).
 3. `.githooks/` and `.qwen/rules/` absent from the tree; `git status` clean; `git config --get core.hooksPath` → unset.
 4. Validation gate green on the branch (CI authoritative for e2e); post-merge CI green on `development`.
