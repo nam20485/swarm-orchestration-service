@@ -361,8 +361,30 @@ class TestRunHappyPath:
         # minus the receiver's own webhook signing secret
         assert env is not None and env.get("PATH") == os.environ.get("PATH")
         assert "OS_WEBHOOK_SECRET" not in env
+        # PaiR kill switch overrides any inherited value (pair-integrations
+        # I1): a receiver run from a PaiR-managed terminal must not leak
+        # dispatched sessions' tool events into the dev's PaiR feed.
+        assert env.get("PAIR_NOTIFY") == "0"
         # new_session received the same workspace cwd
         assert conn.calls[1][1] == cwd
+
+    def test_spawns_with_pair_notify_zero_even_when_parent_sets_it(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # The dangerous shape: parent says PAIR_NOTIFY=1 (PaiR active) and
+        # PAIR_TERMINAL points at the dev's pane — the child must still get
+        # the kill switch; PAIR_TERMINAL riding along is harmless once
+        # PAIR_NOTIFY=0 (the plugin gates on notify first).
+        monkeypatch.setenv("PAIR_NOTIFY", "1")
+        monkeypatch.setenv("PAIR_TERMINAL", "pty-probe")
+        cfg = make_settings(tmp_path)
+        conn, proc, calls = FakeConn(), FakeProc(), []
+        install_spawn(monkeypatch, conn, proc, calls)
+
+        asyncio.run(AcpHost(cfg, EventStore()).run(make_info()))
+
+        (_, _, _, _, env) = calls[0]
+        assert env["PAIR_NOTIFY"] == "0"
 
     def test_prompt_derived_from_envelope(self, tmp_path, monkeypatch) -> None:
         cfg = make_settings(tmp_path)
