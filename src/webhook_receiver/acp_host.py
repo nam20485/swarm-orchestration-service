@@ -39,7 +39,8 @@ Event type                   Data
 ``agent_mode_update``        mode_id
 ``agent_session_info``       title, updated_at
 ``agent_config_update``      options (config-option list, wire names)
-``agent_update``             kind, payload (unrecognized kinds — never dropped)
+``agent_update``             kind, payload (unrecognized kinds — never dropped;
+                             host notices too, e.g. the D4 ``fallback_model_canary``)
 ``agent_usage``              used, size, cost
 ``agent_permission``         title, action, reason (policy decision)
 ``agent_finished``           session_id, stop_reason, ok, error (on failure)
@@ -101,6 +102,16 @@ logger = logging.getLogger(__name__)
 
 # Grace window for killing the agent process during shutdown/cleanup.
 _KILL_GRACE_SECONDS = 5.0
+
+# D4 fallback-model canary (docs/plans/charlie68-incident-followups.md, owner
+# decision (c) 2026-10-24): opencode v2.1.3's version-dependent default model
+# fell back to the authless free-tier endpoint — three dispatched runs died on
+# intermittent capacity errors (2026-10-23) — and its live usage signature was
+# exactly this pair: a 262144-token window at cost 0.0 (the paid coding-plan
+# pin reports a 1M window and nonzero cost). The first usage update carrying
+# the signature warns loudly and surfaces as an ``agent_update`` event so the
+# run detail shows it.
+_FALLBACK_MODEL_SIZE = 262144
 
 
 class AcpHostError(RuntimeError):
@@ -243,6 +254,9 @@ class HostClient:
         # end a live run. run() re-arms it when the prompt starts so the
         # handshake never debits the idle budget.
         self.last_activity = time.monotonic()
+        # D4 canary: warn on the fallback signature at most once per run —
+        # the first usage update is decisive, later ones only repeat it.
+        self._fallback_warned = False
 
     async def session_update(self, session_id: str, update: Any, **_: Any) -> None:
         """ALL-traces mapping (webui plan W0): every ``session/update`` kind
@@ -281,6 +295,7 @@ class HostClient:
                 size=getattr(update, "size", None),
                 cost=getattr(update, "cost", None),
             )
+            self._warn_on_fallback_signature(update)
             return
         if kind == "plan":
             emit(
@@ -333,6 +348,42 @@ class HostClient:
             )
             return
         emit("agent_update", run_id=run_id, kind=kind, payload=_json_safe(update))
+
+    def _warn_on_fallback_signature(self, update: Any) -> None:
+        """D4 canary: warn once when usage matches the free-tier fallback.
+
+        The stamped root ``opencode.json`` model pin (O1,
+        ``zai-coding-plan/glm-5.3``) is the intended resolution; this
+        signature means the session fell back to the authless default
+        instead — loud now, not three dead runs later (2026-10-23). Warn-only
+        by design: the free endpoint serves intermittently so the run may
+        still finish, and kill decisions stay with the idle watchdog.
+        """
+        if self._fallback_warned:
+            return
+        size = getattr(update, "size", None)
+        # cost is an Optional Cost model on the wire ({amount, currency});
+        # the free-tier default reports amount 0.0 — or omits cost entirely.
+        # The window size is the discriminator: the paid pin reports 1M.
+        cost = getattr(update, "cost", None)
+        amount = getattr(cost, "amount", None) if cost is not None else None
+        if size == _FALLBACK_MODEL_SIZE and (amount is None or amount == 0):
+            self._fallback_warned = True
+            logger.warning(
+                "fallback model canary run_id=%s: usage size=%s cost=%s "
+                "matches the authless free-tier default (2026-10-23 "
+                "incident, D4) — the stamped root opencode.json pin is not "
+                "resolving; expect intermittent provider errors",
+                self._run_id,
+                size,
+                amount,
+            )
+            self._store.emit(
+                "agent_update",
+                run_id=self._run_id,
+                kind="fallback_model_canary",
+                payload={"size": size, "cost": amount},
+            )
 
     async def request_permission(
         self, session_id: str, tool_call: Any, options: list[Any], **_: Any
