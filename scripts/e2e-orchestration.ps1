@@ -39,7 +39,9 @@
     python branch).
 
 .PARAMETER Port
-    Loopback port the listener binds (default 8765).
+    Loopback port the listener binds (default 8765). When left at the default
+    and 8765 is busy on loopback, the script walks upward to the first free
+    port (an explicitly passed -Port never walks — it binds or fails loudly).
 
 .PARAMETER WebhookSecret
     HMAC secret for the run; a known placeholder value, never a real
@@ -234,6 +236,32 @@ function Restore-RunEnvironment {
     }
 }
 
+function Resolve-Port {
+    # Free-port walk (rev2 Stage 2): the default 8765 is a well-known local
+    # squatter magnet (a host here runs a systemd service that holds
+    # 127.0.0.1:8765 indefinitely — the listener then fails to bind and the
+    # health probe reads the intruder's response). Only the DEFAULT walks to
+    # a free port; an explicitly passed -Port is operator intent and keeps
+    # failing loudly as before.
+    param([int]$Preferred)
+
+    for ($candidate = $Preferred; $candidate -lt ($Preferred + 100); $candidate++) {
+        $listener = $null
+        try {
+            $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $candidate)
+            $listener.Start()
+            return $candidate
+        }
+        catch [System.Net.Sockets.SocketException] {
+            # port in use — try the next one
+        }
+        finally {
+            if ($null -ne $listener) { $listener.Stop() }
+        }
+    }
+    throw "No free loopback port found in $Preferred..$($Preferred + 99) (pass -Port explicitly)"
+}
+
 # =============================================================================
 # Main
 # =============================================================================
@@ -257,6 +285,16 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'pip upgrade failed' }
         & $venvPython -m pip install --quiet -r (Join-Path $serviceDir 'requirements-dev.txt')
         if ($LASTEXITCODE -ne 0) { throw 'pip install failed' }
+    }
+
+    if (-not $PSBoundParameters.ContainsKey('Port')) {
+        # Only walk when the caller left the default; log the substitution so
+        # a squatted 8765 is visible in the run output, not a mystery.
+        $walked = Resolve-Port -Preferred $Port
+        if ($walked -ne $Port) {
+            Write-Host "Port $Port busy on loopback — e2e using $walked instead." -ForegroundColor Yellow
+        }
+        $Port = $walked
     }
 
     New-RunEnvironment
