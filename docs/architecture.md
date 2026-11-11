@@ -17,10 +17,14 @@ replaces the old `orchestrator-service` dispatch. Two properties define it:
   container and attached one-shot clients to it. Here every accepted delivery
   spawns one cold `opencode acp` session that lives exactly as long as the
   work item and is killed afterward.
-- **No prompt-encoded state machine.** The old stack chained workflow steps
-  by applying the *next label* from a 431-line match table. Here the prompt
-  is an open-ended direction: the agent reads live tracking state over `gh`
-  and decides the next step itself.
+- **No prompt-encoded procedures — a canonical state map instead.** The old
+  stack chained workflow steps by applying the *next label* from a 431-line
+  match table (vendored for reference at `docs/reference/`). The rev2 prompt
+  splits the job: a compact state map (one constant in `prompt_builder.py`)
+  carries what a session cannot derive — states, transition contracts,
+  completion markers, the loop and one-unit-per-run rules — while deciding
+  stays dynamic: the agent confirms live tracking state over `gh` and adapts,
+  deviating when live state demands it and saying why.
 
 State is deliberately in-process and non-durable — a lost envelope is
 recovered by GitHub's webhook redelivery, not by a local store.
@@ -57,8 +61,8 @@ GitHub App webhook (issues.labeled)
   v
 transport gate -> 202 ignored                              filters.py
   |  only: non-bot sender + workflow label
-  |  (orchestration:* | gh-issue-tracking:* |
-  |   implementation:ready|complete | direct-body*)
+  |  (gh-issue-tracking:* | implementation:ready|complete |
+  |   direct-body*)
   v
 PromptInfo envelope, frozen; prompt built at enqueue;      prompt_builder.py
   |  delivery-id dedup (window 1024; redelivery -> 202 duplicate)

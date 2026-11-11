@@ -1,11 +1,10 @@
 # Rev2 State Map — Design Writeup + Sequenced Dev Plan
 
-Status: **IN OWNER FEEDBACK — markup nearly complete, all feedback folded as of 2026-10-24
-(blocks marked `**Feedback:**`, each with a `Folded` note beneath); ONE final owner pass pending
-before approval. No implementation yet.** Baseline direction
-approved in principle (owner 2026-10-24: "ok im sold — lets do C with a goal of adding D via the
-swarm skill"). This doc is the implementation contract for the prompt rework, and the unified
-order for the charlie68 follow-ups.
+Status: **APPROVED — direction C (owner 2026-10-24: "ok im sold — lets do C with a goal of
+adding D via the swarm skill"), all feedback folded as of 2026-10-24; implementation started
+2026-11-10 (owner: "go ahead and work through them") — Stage 3 lands on branch
+`dev/rev2-state-map`.** This doc is the implementation contract for the prompt rework, and the
+unified order for the charlie68 follow-ups.
 
 Companions:
 
@@ -474,3 +473,45 @@ in the posterity branch (PR #53) and never reach `development`.
    cycle merges without a human curator. Mitigations: entries stay factual + dated; lessons
    that should govern future runs land as rules-file edits riding a PR through the review
    loop, not as bare memory; `needs-owner` remains the escape hatch.
+
+## 8. Decisions
+
+Decisions 1–8 are carried content-level from #53's plan doc
+(`dev/restore-rev2-clause-table`, PR closed for posterity 2026-11-01) per the §6 fate table;
+9–11 are new with C. All are owner-approved (2026-10-24) unless noted.
+
+1. **Loop, not halt** (survives) — after a unit completes, the pipeline scans for and advances
+   the next unimplemented unit until the plan is fully implemented. In C: the map's
+   on-completion transitions + "the label you apply re-triggers the next run".
+2. **Completion marker = the closed issue** (survives) — closed story/epic issues, never
+   deprecated rev1 labels (applying one re-enters the gate and burns a default run). In C:
+   the map's completion-markers bullet.
+3. **direct-body wrapper** (COMPACTED, owner 2026-10-24) — #53 ported the reference's
+   BEGIN/END clause wrapper; C compacts its hygiene into the map's standing mechanics and
+   keeps Phase 3's bare-verbatim body (the wrapper's board-link step is a workflow concern,
+   not a prompt concern).
+4. **No rev1 clauses** (survives, extended) — deprecated labels fall to a deprecated-note
+   direction; with this Stage's gate narrowing they no longer dispatch at all.
+5. **Memory-graph machinery stripped** (survives) — the reference's mandatory `search_nodes`
+   startup/finale remains discontinued machinery; absent from the map.
+6. **Phase 3 discovery prose** (survives, re-scoped) — the new-app-vs-existing-feature
+   section and live-state progression language stay in the shared template (C replaces only
+   the direction paragraphs).
+7. **Smoke surfaces re-keyed to rev2** (survives, applied here) — `acp_smoke` default label
+   and `scripts/e2e-orchestration.ps1` scenario 1 → `gh-issue-tracking:init-success`.
+8. **Unit handoffs carry the ISSUE NUMBER** (survives) — `implement-epic` /
+   `review-epic-prs` take `$epic` = the epic's ISSUE NUMBER, never the "Epic N:" title
+   ordinal; `extract_epic_from_title` stays retired. In C: the map's workflow-contracts
+   bullet.
+9. **Mechanical knowledge, dynamic execution** (owner 2026-10-24) — deciding stays dynamic
+   (live tracking state, adapt, say why); knowing (states, contracts, markers, loop
+   semantics) is the map, one standalone constant structured for the D re-home.
+10. **Story-level cycle absorbs D6** (owner 2026-10-24, O2/O3) — `implementation:ready` /
+    `implementation:complete` rows carry the autonomous PR cycle (2–3 subagent reviewers →
+    `/resolve-pr-comments` to zero threads → `/fix-failing-workflows` to green → merge on
+    ALL GREEN + MERGEABLE + zero unresolved; 3-round budget then `needs-owner`); one unit
+    per run.
+11. **Durable memory + division of labor** (owner 2026-10-24) — the map says WHAT/WHEN; the
+    clone's `.agents/rules/` say HOW; `.agents/memory.md` records WHAT HAPPENED. Sessions
+    orient from memory first and append a dated learning before ending; lessons that should
+    govern future runs are rules-file edits riding the run's PR.
