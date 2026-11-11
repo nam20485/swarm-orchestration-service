@@ -538,11 +538,19 @@ class AcpHost:
                     # subset (no GITHUB_TOKEN / provider keys) unless the env
                     # is passed explicitly — sessions would run credential-less.
                     # OS_WEBHOOK_SECRET stays receiver-side: the agent has no
-                    # use for the webhook signing secret.
+                    # use for the webhook signing secret. PAIR_NOTIFY=0 is the
+                    # PaiR kill switch (pair-integrations I1, 2026-10-27): a
+                    # receiver run from a PaiR-managed terminal otherwise
+                    # inherits PAIR_TERMINAL, and every dispatched session's
+                    # opencode loads the globally-installed pair plugin and
+                    # funnels its tool events into the dev's PaiR feed.
                     env={
-                        k: v
-                        for k, v in os.environ.items()
-                        if k != "OS_WEBHOOK_SECRET"
+                        **{
+                            k: v
+                            for k, v in os.environ.items()
+                            if k != "OS_WEBHOOK_SECRET"
+                        },
+                        "PAIR_NOTIFY": "0",
                     },
                 cwd=str(workspace),
             ) as (conn, proc):
