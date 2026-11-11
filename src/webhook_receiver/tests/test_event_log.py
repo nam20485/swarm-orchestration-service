@@ -201,8 +201,8 @@ class TestRunsEndpoints:
             {
                 "action": "labeled",
                 "sender": {"login": "nam20485"},
-                "label": {"name": "orchestration:plan"},
-                "issue": {"number": 1, "labels": [{"name": "orchestration:plan"}]},
+                "label": {"name": "gh-issue-tracking:init-success"},
+                "issue": {"number": 1, "labels": [{"name": "gh-issue-tracking:init-success"}]},
                 "repository": {"full_name": "owner/repo"},
             }
         ).encode()

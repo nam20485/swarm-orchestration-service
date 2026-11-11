@@ -289,8 +289,11 @@ try {
         -Actual (($health.Content | ConvertFrom-Json).status) -Expected 'ok'
 
     # -- Scenario 1: happy accept (workflow label) --------------------------
+    # rev2 dispatch vocabulary (re-keyed from the rev1 orchestration: label —
+    # rev1 labels no longer pass the dispatch gate after the Stage 3
+    # narrowing; this scenario must exercise a label that actually dispatches).
     $body = New-LabelPayload -Repo 'owner/e2e-repo' `
-        -Label 'orchestration:plan-approved' -Sender 'nam20485'
+        -Label 'gh-issue-tracking:init-success' -Sender 'nam20485'
     $resp = Invoke-GithubWebhook -Event 'issues' -DeliveryId 'e2e-accept-1' `
         -Body $body -Signature (Get-Signature -Body $body -Secret $WebhookSecret)
     Assert-Equal -Name 'happy accept returns 202' -Actual $resp.StatusCode -Expected 202
