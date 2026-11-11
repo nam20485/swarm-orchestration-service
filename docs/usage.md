@@ -132,6 +132,7 @@ SSH tunnel / tailnet serve.
 | `202` but only `webhook_filtered` | gate said no: bot sender, non-workflow label, or `direct-body` from a non-allowlisted sender (`reason` field says which) |
 | `webhook_duplicate` | GitHub redelivery inside the dedup window (1024 deliveries) — already processed; nothing to do |
 | `prompt_consumed {ok: false}` | the agent session failed: opencode missing/unauthenticated, the idle watchdog fired (raise `ACP_IDLE_TIMEOUT` if a legitimately silent tool call outlives the budget), an opt-in `ACP_PROMPT_TIMEOUT` ceiling bound the run, or a permission policy cancellation — `error` field carries the cause |
+| `fallback_model_canary` event + WARNING log | the session's first usage report matches the authless free-tier default (262144-token window, cost 0.0 — the 2026-10-23 incident class): the dispatch clone's stamped root `opencode.json` model pin is not resolving, so the run is on the free endpoint and may die intermittently — check the clone's root `opencode.json` `model` key and the host opencode version (D4 canary; warn-only, the run is not killed) |
 | sandbox mode: envelope fails fast | fail-closed by design when the sandbox API is unreachable — check `SANDBOX_API_URL` and docker; no silent scratch fallback |
 | nothing at all in `/events` | you hit a different instance than the one GitHub delivers to, or the funnel is down (`/health` through the public URL proves the path) |
 

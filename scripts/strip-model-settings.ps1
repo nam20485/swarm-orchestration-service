@@ -3,44 +3,49 @@
 
 <#
 .SYNOPSIS
-    Strip model settings from a freshly cloned orchestrator-dispatched instance.
+    Normalize model settings in a freshly cloned orchestrator-dispatched instance:
+    strip the per-tier pins, stamp the dispatch pin.
 
 .DESCRIPTION
     opencode resolves the effective model in precedence order: built-in <
-    global config < project config (.opencode/opencode.jsonc) < session (--model)
-    < AGENT FRONTMATTER model:. The agent-context template ships a per-tier model
-    mix at BOTH layers — agent frontmatter (glm-5.3-flash for
-    implementers/specialists; glm-5.3 for coordinators) AND a project-config
-    `model: glm-5.3` / `small_model: glm-4.5-air`. Those are correct for
-    INTERACTIVE use — the template must KEEP them, because it also seeds repos
-    that are NOT driven by orchestrator-service and would otherwise be left with
-    no model settings at all. But on orchestrator-service headless dispatches
-    they OVERRIDE the dispatch defaults (`--model qwencloud/qwen3.7-max
-    --variant high`): subagents run glm-5.3-flash and the orchestrator runs
-    glm-5.3, defeating the model selection the orchestrator-service runtime
-    image owns.
+    global config < project config < session < AGENT FRONTMATTER model:. The
+    swarm-context template ships a per-tier model mix at multiple layers — agent
+    frontmatter plus the root `opencode.json` it stamps since the v2 migration
+    (opencode v2 no longer reads `.opencode/opencode.jsonc`). Those pins are
+    correct for INTERACTIVE use — the template must KEEP them, because it also
+    seeds repos that are NOT driven by the dispatch pipeline and would otherwise
+    be left with no model settings at all. But on headless dispatches the
+    receiver owns model selection: the stamped root `opencode.json` `model` pin
+    (O1, `zai-coding-plan/glm-5.3` — docs/plans/charlie68-incident-followups.md)
+    is the dispatch default, and any agent frontmatter pin would override it.
 
-    This script REMOVES (not rewrites) the model pins from the cloned instance
-    so every layer falls back to the orchestrator-service dispatch/runtime
-    settings:
+    This script therefore does two things to the cloned instance:
 
-      1. Agent frontmatter (.opencode/agents/*.md): delete every top-level
-         `model:` line inside the frontmatter fence. With no frontmatter pin
-         the agent inherits the session model (the dispatch `--model`).
+      1. STRIP the overriding pins: agent frontmatter (.opencode/agents/*.md)
+         top-level `model:` lines are deleted (the agent then inherits the
+         project-config model), and legacy project config
+         (.opencode/opencode.jsonc/.json — the v1 config location) top-level
+         `model`/`small_model` keys are deleted (JSONC comma hygiene included).
 
-      2. Project config (.opencode/opencode.jsonc/.json): delete the top-level
-         `"model"` and `"small_model"` keys (JSONC comma hygiene included) so
-         the project layer no longer overrides the global/dispatch defaults.
+      2. STAMP the dispatch pin: the root `opencode.json` (v2's config
+         location, stamped by the template) top-level `"model"` key is set to
+         -PinModel. A missing root file is left missing (pre-migration clones
+         are an S3 fleet decision, not this script's job) and reported.
 
     SCOPE: Only invoked from create-repo-agent-context.ps1 — the orchestrator-
     dispatch seeding path. Repos cloned for NON-orchestrator (interactive) use
     never run this script, so the template's per-tier models stay intact for
     them. The template itself keeps its model pins.
 
-    Idempotent: already-absent pins are left untouched. Safe to re-run.
+    Idempotent: already-absent pins are left untouched; an already-correct root
+    pin is left byte-identical. Safe to re-run.
 
 .PARAMETER RepoRoot
     Absolute or relative path to the freshly cloned repository root.
+
+.PARAMETER PinModel
+    The dispatch model pin stamped into the root opencode.json `model` key.
+    Default `zai-coding-plan/glm-5.3` (owner decision O1, 2026-10-24).
 
 .PARAMETER DryRun
     Log planned operations without touching the filesystem.
@@ -53,11 +58,10 @@
 
 .NOTES
     Runs AFTER clone + placeholder replacement + Class-2 cleanup + headless
-    permissions but BEFORE the seed-commit amend, so the stripped models ship
+    permissions but BEFORE the seed-commit amend, so the normalized models ship
     in the pushed seed commit. Sibling override to apply-headless-permissions.ps1.
     Root cause: opencode precedence makes agent frontmatter `model:` the decisive
-    layer, so the dispatch `--model` and global `model` are both defeated by the
-    workspace agent definitions cloned from the template.
+    layer, so every frontmatter pin defeats the stamped root-config model.
 #>
 
 [CmdletBinding()]
@@ -65,6 +69,10 @@ param(
     [Parameter(Mandatory = $true, HelpMessage = 'Path to the freshly cloned repository root.')]
     [ValidateNotNullOrEmpty()]
     [string]$RepoRoot,
+
+    [Parameter(HelpMessage = 'Dispatch model pin stamped into the root opencode.json (O1 default).')]
+    [ValidateNotNullOrEmpty()]
+    [string]$PinModel = 'zai-coding-plan/glm-5.3',
 
     [Parameter(HelpMessage = 'Log planned operations without touching the filesystem.')]
     [switch]$DryRun
@@ -254,6 +262,84 @@ foreach ($cfgPath in @($jsoncPath, $jsonPath)) {
 
 if (-not $configFound) {
     Write-Host ' .opencode/opencode.json(c) not found — skipping project config' -ForegroundColor DarkGray
+}
+
+# ── 3. Root opencode.json: stamp the dispatch model pin (O1) ─────────────────
+# v2's config location, stamped by the template (root opencode.json replaces
+# the dead .opencode/opencode.jsonc). The template's own pin value stays right
+# for interactive clones; dispatched clones get the O1 pin here. Only the
+# top-level "model" key is touched — small_model and everything else ride the
+# template byte-for-byte. Line-based like step 2 so the file is preserved
+# except the one key (a full JSON round-trip would reformat the doc).
+
+$rootConfigPath = Join-Path $resolvedRoot 'opencode.json'
+
+if (Test-Path -LiteralPath $rootConfigPath) {
+    $raw = [System.IO.File]::ReadAllText($rootConfigPath, $utf8NoBom)
+    $le = if ($raw.Contains("`r`n")) { "`r`n" } else { "`n" }
+    $lines = $raw -split "\r?\n"
+
+    # Top-level classification (same brace-depth walk as step 2; the root doc
+    # is strict JSON but the classifier is comment-safe anyway).
+    $depth = 0
+    $modelLineIdx = -1
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $isKey = ($depth -eq 1) -and ($lines[$i] -match '^\s*"model"\s*:')
+        if ($isKey -and $modelLineIdx -lt 0) { $modelLineIdx = $i }
+        $depth += Get-BraceDelta -Line $lines[$i]
+    }
+
+    if ($modelLineIdx -ge 0) {
+        $already = $lines[$modelLineIdx] -match [regex]::Escape('"' + $PinModel + '"')
+        if ($already) {
+            Write-Host " opencode.json: model pin already $PinModel (unchanged)" -ForegroundColor DarkGray
+        }
+        else {
+            $newLine = $lines[$modelLineIdx] -replace '("[^"]*"\s*:\s*")[^"]*(")', ('$1' + $PinModel + '$2')
+            $lines[$modelLineIdx] = $newLine
+            if ($DryRun) {
+                Write-Host (" [dry-run] opencode.json: would stamp model = {0}" -f $PinModel) -ForegroundColor Yellow
+            }
+            else {
+                [System.IO.File]::WriteAllText($rootConfigPath, ($lines -join $le), $utf8NoBom)
+                Write-Host (" opencode.json: stamped model = {0}" -f $PinModel) -ForegroundColor DarkGray
+            }
+        }
+    }
+    else {
+        # No top-level model key: insert one directly after the opening brace
+        # line. Comma hygiene: append a comma unless the object is empty
+        # (next non-blank line closes it).
+        $insertIdx = -1
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match '\{') { $insertIdx = $i + 1; break }
+        }
+        if ($insertIdx -gt 0 -and $insertIdx -lt $lines.Count) {
+            $needsComma = $true
+            for ($j = $insertIdx; $j -lt $lines.Count; $j++) {
+                if ($lines[$j].Trim() -eq '') { continue }
+                if ($lines[$j] -match '^\s*[}]') { $needsComma = $false }
+                break
+            }
+            $modelLine = '  "model": "' + $PinModel + '"' + $(if ($needsComma) { ',' } else { '' })
+            if ($DryRun) {
+                Write-Host (" [dry-run] opencode.json: would insert model = {0}" -f $PinModel) -ForegroundColor Yellow
+            }
+            else {
+                $out = [System.Collections.Generic.List[string]]::new()
+                $out.AddRange([string[]]$lines)
+                $out.Insert($insertIdx, $modelLine)
+                [System.IO.File]::WriteAllText($rootConfigPath, ($out -join $le), $utf8NoBom)
+                Write-Host (" opencode.json: inserted model = {0}" -f $PinModel) -ForegroundColor DarkGray
+            }
+        }
+        else {
+            Write-Host ' opencode.json: no top-level object found — pin not stamped' -ForegroundColor Yellow
+        }
+    }
+}
+else {
+    Write-Host ' opencode.json (root) not found — pin not stamped (pre-v2-template clone; see migration S3)' -ForegroundColor Yellow
 }
 
 Write-Host '=== strip-model-settings complete ===' -ForegroundColor Green

@@ -27,10 +27,11 @@
          (relax template `ask` -> `allow` so headless orchestrator dispatches
            never block on an unanswerable permission ask; preserves `deny`)
        3.5. strip-model-settings.ps1 -RepoRoot <clonePath>
-          (remove every agent `model:` pin + project-config `model` /
-            `small_model` keys so the orchestrator-service runtime/dispatch
-            model selection prevails; the template's per-tier models — glm-5.3 /
-            glm-5.3-flash — are kept in the template for
+          (strip every agent `model:` pin + legacy project-config `model` /
+            `small_model` keys, then stamp the root opencode.json `model`
+            pin to the dispatch default zai-coding-plan/glm-5.3 (O1) — the
+            stamped pin is the dispatch-owned model selection under opencode
+            v2; the template's per-tier models are kept in the template for
             non-orchestrator interactive clones)
       4. import-labels.ps1 -Repo "$Owner/$RepoName"
           -LabelsFile <this repo>/.github/.labels.json
@@ -265,15 +266,16 @@ foreach ($clonePath in $clonePaths) {
     & $permScript @permParams
     Write-Host ' done' -ForegroundColor Green
 
-    # Step 3.5: Strip all model pins (agent frontmatter `model:` + project
-    # config `model`/`small_model`). MUST run before the seed-commit amend so
-    # the stripped config ships in the pushed commit. With the pins gone every
-    # layer falls back to the orchestrator-service dispatch `--model
-    # qwencloud/qwen3.7-max` / runtime image config instead of the template's
-    # per-tier overrides (glm-5.3 / glm-5.3-flash). The template itself keeps its
-    # models for non-orchestrator interactive clones. See
-    # strip-model-settings.ps1 for the root cause.
-    Write-Host 'Stripping model pins...' -ForegroundColor Cyan -NoNewline
+    # Step 3.5: Normalize model settings — strip the overriding pins (agent
+    # frontmatter `model:` + legacy project config `model`/`small_model`),
+    # then stamp the root opencode.json `model` pin to the dispatch default
+    # (O1, zai-coding-plan/glm-5.3). MUST run before the seed-commit amend so
+    # the normalized config ships in the pushed commit. With the frontmatter
+    # pins gone the stamped root pin is the effective model (opencode v2
+    # reads the root opencode.json; .opencode/opencode.jsonc is dead config).
+    # The template itself keeps its models for non-orchestrator interactive
+    # clones. See strip-model-settings.ps1 for the root cause.
+    Write-Host 'Normalizing model settings...' -ForegroundColor Cyan -NoNewline
     $modelParams = @{ RepoRoot = $clonePath }
     if ($DryRun) { $modelParams['DryRun'] = $true }
     & $modelScript @modelParams

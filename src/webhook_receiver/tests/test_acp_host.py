@@ -26,6 +26,7 @@ from acp.schema import (
     AvailableCommand,
     AvailableCommandsUpdate,
     ConfigOptionUpdate,
+    Cost,
     CurrentModeUpdate,
     PermissionOption,
     PlanEntry,
@@ -1209,6 +1210,58 @@ class TestHostClientMapping:
         assert data["run_id"] == "run-1"
         assert data["kind"] == "future_kind"
         assert "payload" in data  # never dropped, always inspectable
+
+    def test_usage_fallback_signature_warns_once_with_event(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # D4 canary: the 2026-10-23 authless free-tier fallback's live
+        # signature (262144-token window, cost 0.0) warns once and surfaces
+        # as an agent_update so the run detail shows it.
+        client, store = self.make_client()
+        update = UsageUpdate(
+            session_update="usage_update",
+            used=1,
+            size=262144,
+            cost=Cost(amount=0.0, currency="USD"),
+        )
+
+        async def main() -> None:
+            await client.session_update("s", update)
+            await client.session_update("s", update)
+
+        with caplog.at_level("WARNING", logger="webhook_receiver.acp_host"):
+            asyncio.run(main())
+
+        canary = events_of_type(store, "agent_update")
+        assert len(canary) == 1  # once per run, not per usage update
+        assert canary[0]["data"]["kind"] == "fallback_model_canary"
+        assert canary[0]["data"]["run_id"] == "run-1"
+        assert canary[0]["data"]["payload"] == {"size": 262144, "cost": 0.0}
+        assert "fallback model canary" in caplog.text
+        # every usage update still maps to agent_usage untouched
+        assert len(events_of_type(store, "agent_usage")) == 2
+
+    def test_usage_pinned_signature_does_not_warn(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        client, store = self.make_client()
+
+        async def main() -> None:
+            await client.session_update(
+                "s",
+                UsageUpdate(
+                    session_update="usage_update",
+                    used=5,
+                    size=1000000,
+                    cost=Cost(amount=0.024, currency="USD"),
+                ),
+            )
+
+        with caplog.at_level("WARNING", logger="webhook_receiver.acp_host"):
+            asyncio.run(main())
+
+        assert not events_of_type(store, "agent_update")
+        assert "fallback model canary" not in caplog.text
 
     _EXPECTED_EVENTS = {
         "user_message_chunk": "user_message_chunk",
