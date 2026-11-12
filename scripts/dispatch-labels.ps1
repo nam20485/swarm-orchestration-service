@@ -44,7 +44,11 @@ function Ensure-DispatchBootstrapLabel {
         [string]$LabelsFile,
 
         [Parameter()]
-        [string]$LabelName = 'orchestration:dispatch',
+        # Default re-keyed to the rev2 dispatch vocabulary (Stage 3 gate
+        # narrowing): the rev1 'orchestration:dispatch' label no longer
+        # dispatches. The only consumer passes -LabelName explicitly, so this
+        # default is documentation more than behavior — keep it truthful.
+        [string]$LabelName = 'gh-issue-tracking:direct-body',
 
         [switch]$IsDryRun
     )
