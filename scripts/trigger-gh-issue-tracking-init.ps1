@@ -15,8 +15,11 @@
     the target repo if missing) before being attached to the dispatch issue.
     To create a bare, unlabeled issue, pass -Labels @().
 
-    To use the legacy orchestration method instead, pass
-    -Labels 'orchestration:dispatch'.
+    The legacy rev1 `orchestration:*` labels (e.g. the old
+    `orchestration:dispatch` trigger) NO LONGER DISPATCH — the receiver's
+    gate narrowed to the rev2 vocabulary (gh-issue-tracking:* +
+    implementation:ready|complete) — so passing one fails fast below instead
+    of creating an issue that silently never triggers.
 
     It replaced the launcher's legacy `trigger-project-setup.ps1`, which
     dispatched `/orchestrate-dynamic-workflow $workflow_name = project-setup`
@@ -40,8 +43,8 @@
     Labels to attach to the dispatch issue. Each is bootstrapped from
     -BootstrapLabelsFile if provided. Default: @('gh-issue-tracking:direct-body'),
     which the orchestrator's direct-body clause matches to run the issue body
-    verbatim. Pass 'orchestration:dispatch' for the legacy method, or @() for a
-    bare, unlabeled issue.
+    verbatim. Pass @() for a bare, unlabeled issue. Rev1 `orchestration:*`
+    labels are rejected — they no longer dispatch (rev2 gate narrowing).
 
 .PARAMETER DryRun
     Show what would be created without making any changes.
@@ -51,13 +54,6 @@
     ./scripts/trigger-gh-issue-tracking-init.ps1 `
         -Repo "intel-agency/my-app-delta12" `
         -BootstrapLabelsFile "./clones/my-app-delta12/.github/.labels.json"
-
-.EXAMPLE
-    # Legacy method: dispatch issue labeled orchestration:dispatch.
-    ./scripts/trigger-gh-issue-tracking-init.ps1 `
-        -Repo "intel-agency/my-app-delta12" `
-        -BootstrapLabelsFile "./clones/my-app-delta12/.github/.labels.json" `
-        -Labels 'orchestration:dispatch'
 
 .EXAMPLE
     ./scripts/trigger-gh-issue-tracking-init.ps1 `
@@ -78,7 +74,7 @@ param(
     [Parameter(HelpMessage = 'Path to the clone''s .github/.labels.json used to bootstrap labels in -Labels that do not yet exist on the target repo.')]
     [string]$BootstrapLabelsFile,
 
-    [Parameter(HelpMessage = 'Labels to attach to the dispatch issue (each bootstrapped from -BootstrapLabelsFile if provided). Default: gh-issue-tracking:direct-body. Pass orchestration:dispatch for the legacy method, or @() for a bare issue.')]
+    [Parameter(HelpMessage = 'Labels to attach to the dispatch issue (each bootstrapped from -BootstrapLabelsFile if provided). Default: gh-issue-tracking:direct-body. Pass @() for a bare issue; rev1 orchestration:* labels are rejected (they no longer dispatch).')]
     [string[]]$Labels = @('gh-issue-tracking:direct-body'),
 
     [Parameter(HelpMessage = 'Show what would be created without making any changes.')]
@@ -86,6 +82,15 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# Fail fast on the deprecated rev1 vocabulary: the dispatch gate no longer
+# admits orchestration:* labels (rev2 Stage 3 narrowing), so a trigger issue
+# carrying one would sit silently undispatched — refuse it loudly instead.
+$rev1Labels = @($Labels | Where-Object { $_ -like 'orchestration:*' })
+if ($rev1Labels.Count -gt 0) {
+    throw ("rev1 orchestration:* labels no longer dispatch (rev2 gate narrowing): " +
+        "$($rev1Labels -join ', '). Use the default 'gh-issue-tracking:direct-body'.")
+}
 
 Write-Host '=== trigger-gh-issue-tracking-init ===' -ForegroundColor Cyan
 if ($DryRun) { Write-Host '[DRY-RUN MODE]' -ForegroundColor Yellow }

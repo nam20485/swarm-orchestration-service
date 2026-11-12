@@ -3,15 +3,15 @@
 Drives one envelope through the real ``AcpHost`` → ``opencode acp`` path
 against a scratch workspace and prints the EventStore stream plus the final
 outcome. Since Phase 3 the envelope carries the BUILT orchestration prompt
-(``prompt_builder.build_orchestration_prompt``) by default, so the smoke
-shows the real session receiving the open-ended orchestration direction.
-Exit code 0 on ``end_turn``, 1 otherwise.
+(``prompt_builder.build_orchestration_prompt``) by default — since the rev2
+Stage 3 rework that prompt carries the canonical state map, so the smoke
+shows the real session receiving it. Exit code 0 on ``end_turn``, 1 otherwise.
 
 Usage (from the repo root):
 
     OS_WEBHOOK_SECRET=unused-by-smoke .venv/bin/python -m webhook_receiver.acp_smoke \\
         [--repo owner/repo] [--event issues] [--action labeled]
-        [--label orchestration:plan-approved] [--delivery-id smoke-1]
+        [--label gh-issue-tracking:init-success] [--delivery-id smoke-1]
         [--prompt TEXT]
 
 ACP host knobs come from the environment like the service (``ACP_ENABLED`` is
@@ -46,7 +46,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--repo", default="owner/repo")
     parser.add_argument("--event", default="issues")
     parser.add_argument("--action", default="labeled")
-    parser.add_argument("--label", default="orchestration:plan-approved")
+    # Default re-keyed to the rev2 dispatch vocabulary (Decision 7): the
+    # init-success transition is the map's canonical advance, and rev1
+    # orchestration:* labels no longer dispatch after the gate narrowing.
+    parser.add_argument("--label", default="gh-issue-tracking:init-success")
     parser.add_argument("--delivery-id", default="smoke-1")
     parser.add_argument(
         "--prompt",

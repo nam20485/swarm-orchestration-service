@@ -1,23 +1,29 @@
-"""Open-ended orchestration prompt builder (Phase 3).
+"""Orchestration prompt builder (Phase 3, reworked rev2 Stage 3).
 
-Replaces the old repo's 431-line match-clause prompt
-(``orchestration_prompt.jinja2.md`` pinned at orchestrator-service
-@2bd6d06) with natural-language direction built per
-docs/plans/completed/orchestrator-service-simplification.md §3.3: the agent decides
-workflow progression from LIVE tracking state (issues and labels queried
-via ``gh``), never from a hardcoded label→label clause table.
+The old repo's 431-line match-clause prompt (``orchestration_prompt.jinja2.md``
+pinned at orchestrator-service @2bd6d06, vendored for reference at
+``docs/reference/``) was replaced in Phase 3 by open-ended direction — which
+live evidence then showed to be underspecified: the SAME vague prompt on the
+same transition produced both the worst run this stack has seen (3.5 h,
+nothing published) and the best (6 h 50 m, a story implemented end-to-end).
+Variance is what underspecification buys.
 
-Shape (string composition only — no templating engine, Simplicity First):
-one shared workflow template (envelope context, live-state progression,
-new-app vs existing-feature path discovery, publish & verify) plus a short
-per-label-class direction. The dispatch gate stays in ``filters.py`` — a
-``gh-issue-tracking:direct-body`` envelope reaching here was already
-sender-authorized, so its ENTIRE issue body becomes the prompt verbatim
-(the old clause table's direct-body special case, unchanged).
+The rev2 split (docs/plans/rev2-state-map-design.md, owner 2026-10-24,
+"mechanical knowledge, dynamic execution"): DECIDING stays dynamic — the
+agent confirms live tracking state via ``gh`` and adapts — while KNOWING the
+pipeline's states, transition contracts, and completion markers is written
+down once as ``_REV2_STATE_MAP``: every fact a session cannot derive and
+nothing it can. Selection is unchanged from Phase 3: the map is injected for
+every ``gh-issue-tracking:*`` (prefix) and ``implementation:ready|complete``
+(exact) label; ``gh-issue-tracking:direct-body`` keeps its verbatim-body path
+(sender gate upstream in ``filters.py``); every ``orchestration:*`` (rev1)
+label and anything else gets the deprecated-note fallthrough — and since the
+Stage 3 gate narrowing, rev1 labels no longer dispatch at all.
 
-The listener fills ``info.prompt`` with this builder's output at enqueue
-time (docs/plans/completed/promptinfo-design.md §2); the ACP host's prompt seam sends
-the envelope's own prompt when filled (``acp_host.build_prompt``).
+String composition only — no templating engine (Simplicity First). The
+listener fills ``info.prompt`` with this builder's output at enqueue time
+(docs/plans/completed/promptinfo-design.md §2); the ACP host's prompt seam
+sends the envelope's own prompt when filled (``acp_host.build_prompt``).
 Output is deterministic for a given envelope: stable prose plus a
 key-sorted EVENT_DATA JSON dump.
 """
@@ -63,55 +69,115 @@ def _is_direct_body(info: PromptInfo) -> bool:
 
 
 def _unmatched_direction(label: str) -> str:
+    # Deprecated rev1 vocabulary (all orchestration:* — removed from the
+    # dispatch gate in this same change, so reaching here means direct/smoke
+    # use) and unrecognized labels: never improvise a rev1 path.
     return (
-        "No workflow is named by the triggering label. Post a status comment "
-        "on the issue stating that no matching workflow was found, include "
-        "the webhook event details for the run log, and end your turn "
-        "without taking further action."
+        "No rev2 clause matches the triggering label — deprecated rev1 "
+        "vocabulary (orchestration:* labels) or an unrecognized label. Do "
+        "not improvise a rev1 path: post a short status comment on the "
+        "issue stating that no matching rev2 clause was found, then end "
+        "your turn without taking further action."
     ) + (f" (triggering label: {label})" if label else "")
 
 
-_ORCHESTRATION_DIRECTION = (
-    "This is an orchestration lifecycle workflow: the triggering label names "
-    "the workflow step to run from the agent-instructions repo within the "
-    "tracked plan's lifecycle — epic creation for the next unimplemented "
-    "plan item, epic implementation, pull-request review and merge, "
-    "progress report and debrief, or completion of the current stage. When "
-    "the issue body names a workflow to dispatch, run that named workflow "
-    "with the arguments given in the body. Direct the named workflow, and "
-    "let the tracking state you observe decide the concrete next action."
-)
+# The rev2 state map (docs/plans/rev2-state-map-design.md §2 — this text IS
+# the shipped artifact; keep it byte-faithful to the design doc). One
+# constant so the future D re-home into the /orchestrate-swarm skill is a
+# move, not a rewrite. Row format (owner 2026-10-24): "<label> (on the
+# <labelled resource>) — context and instructions → on completion, what to
+# do and which label advances the cycle."
+_REV2_STATE_MAP = """\
+rev2 tracking pipeline — canonical state map
 
-_HIERARCHY_DIRECTION = (
-    "This is a gh-issue-tracking hierarchy workflow: the triggering label "
-    "names a step in building or consuming the repository's issue-tracking "
-    "hierarchy (a plan issue with epic/story/task sub-issues). Direct the "
-    "corresponding named workflow from the agent-instructions repo: when "
-    "the hierarchy was just initialized or extended, enumerate its tracked "
-    "issues and continue with the implementation path for the next "
-    "unimplemented item — after confirming from live tracking state what "
-    "actually exists and what is already done."
-)
+You were dispatched by a label transition on an issue. The label is pipeline
+STATE, not a script: confirm the live tracking state (gh) before acting, then
+advance the pipeline along the canonical transition below. Deviate when live
+state demands it, and say why in your status comment. Advance ONE unit per run,
+then end your turn — the label you apply re-triggers the next run.
 
-_IMPLEMENTATION_DIRECTION = (
-    "This is the implementation path for a tracked work item: the "
-    "triggering label marks the issue ready for implementation, or records "
-    "its implementation complete. Direct the implementation workflow from "
-    "the agent-instructions repo for this issue: implement the item "
-    "(branch, code, tests, pull request) when it is ready, or verify its "
-    "completion from live state (merged pull request, green checks) and "
-    "record that outcome on the issue."
-)
+States and their canonical next transitions. Row format (owner 2026-10-24):
+`<label> (on the <labelled resource>) — context and instructions → on
+completion, what to do and which label advances the cycle.`
+
+- gh-issue-tracking:direct-body (on any issue) — kickoff: the issue body IS
+  the assignment. Execute it verbatim inside the standing mechanics (below).
+  On completion: the body's own stated outcome — e.g. a body running
+  `/gh-issue-tracking-init` ends with `gh-issue-tracking:init-success`
+  applied to the Plan issue.
+
+- gh-issue-tracking:init-success (on the Plan issue) — the hierarchy
+  exists; implementation begins. Find the next unimplemented unit: the
+  lowest-numbered OPEN issue labeled `story` (or `epic` if the plan tracks
+  epics directly), not closed and not already complete. On completion:
+  apply `implementation:ready` to that unit.
+
+- implementation:ready (on a story) — implement THIS story: read it and
+  its epic, branch, code, tests, validation, PR (publish & verify below).
+  One story per run. On completion: apply `implementation:complete` +
+  `needs-review` to the story.
+
+- implementation:complete (on a story) — the story's PR exists and claims
+  done. Drive it to merged: dispatch 2–3 subagent reviewers to review the
+  PR and post comments for found issues, then run /resolve-pr-comments
+  until unresolved threads = 0 and /fix-failing-workflows until checks are
+  green; re-read thread state on the head SHA before merging. Merge gate:
+  ALL checks GREEN + MERGEABLE + zero unresolved threads — otherwise no
+  merge; escalate only when there is no path to resolution. After 3 failed
+  review/fix rounds: park the PR with `needs-owner` and stop. On merge:
+  close the story, then apply `implementation:ready` to the epic's next
+  open story — or, if it was the last, apply
+  `gh-issue-tracking:epic-implemented` to the epic.
+
+- gh-issue-tracking:epic-implemented (on an epic) — one epic done. Review
+  that epic's merged PRs (review-epic-prs), post a progress report on the
+  Plan issue, close the epic. On completion: apply `implementation:ready`
+  to the next unimplemented unit; none left → the plan is fully
+  implemented: post the final summary and close the Plan issue. TERMINAL.
+
+- any other dispatch label (on any issue) — deprecated rev1 vocabulary
+  (all `orchestration:*`; after Stage 3's gate narrowing these should never
+  dispatch at all). Do not improvise a rev1 path: post a short "no matching
+  rev2 clause" status comment and end the turn.
+
+Standing mechanics (every state):
+- First action: status comment on the triggering issue stating what you are
+  doing; last action: the outcome summary.
+- Workflow contracts (nam20485/agent-instructions): implement-epic and
+  review-epic-prs take $epic = the epic's ISSUE NUMBER — NEVER the "Epic N:"
+  ordinal from a title, which is not the issue number. Named single
+  workflows take $workflow_assignment + $assignment_inputs.
+- Completion markers: a story is done when its PR is MERGED and the story
+  issue is closed; an epic is done when its last story is done and the epic
+  issue is closed (issues.closed is ignored by the gate). Never apply rev1
+  labels such as implementation:complete-epic or orchestration:*.
+- Labels are the pipeline's clock: apply ONLY the designed next-transition
+  label, with the account you hold — each label application re-enters the
+  dispatch gate.
+- Publish & verify: non-default branch + PR, never push the default branch;
+  verify remote reachability before declaring done; close the triggering
+  issue only on success.
+- The issue body overrides this map when it names a workflow with explicit
+  arguments.
+- Durable state (orient from it first): the issues, labels and PRs; the
+  clone's `.agents/memory.md` (progress and gotchas from previous runs);
+  the clone's `.agents/rules/` (the how: PR/merge, commit, testing
+  policy). You are this run's only orchestrator, but not its first run.
+  Orient fast; when the canonical next step is clear, act rather than
+  re-deriving the pipeline.
+- Durable learning (write before you end): append a dated entry to
+  `.agents/memory.md` — what this run completed, anything that went wrong
+  and the fix that finally worked. It rides the run's PR; for runs that
+  open no PR, commit it directly to the default branch (`.agents/`
+  bookkeeping only — never work product). A lesson that should govern
+  future runs is a rules-file edit, proposed in the same PR.
+"""
 
 
 def _direction_for(label: str) -> str:
     label = (label or "").strip().lower()
-    if label.startswith("gh-issue-tracking:"):
-        return _HIERARCHY_DIRECTION
-    if label.startswith("orchestration:"):
-        return _ORCHESTRATION_DIRECTION
-    if label in _IMPLEMENTATION_LABELS:
-        return _IMPLEMENTATION_DIRECTION
+    if label.startswith("gh-issue-tracking:") or label in _IMPLEMENTATION_LABELS:
+        return _REV2_STATE_MAP
     return _unmatched_direction(label)
 
 
@@ -199,20 +265,18 @@ _EMPTY_BODY_SENTINEL = (
 
 
 def build_orchestration_prompt(info: PromptInfo) -> str:
-    """Build the open-ended orchestration prompt for one envelope.
+    """Build the orchestration prompt for one envelope.
 
-    Label classes (the old clause table's matrix, now open-ended):
+    Label classes (selection unchanged since Phase 3):
 
     - ``gh-issue-tracking:direct-body`` — the issue body verbatim (sender
       gate already applied upstream in ``filters``); an empty body gets a
       sentinel direction so the agent reports it on the issue.
-    - ``gh-issue-tracking:*`` — the named hierarchy workflow.
-    - ``orchestration:*`` — the named orchestration lifecycle workflow
-      (a body-named dynamic dispatch included).
-    - ``implementation:ready`` / ``implementation:complete`` — the
-      implementation path for the tracked work item.
-    - anything else — report that no matching workflow was found (the old
-      ``(default)`` fallthrough).
+    - ``gh-issue-tracking:*`` and ``implementation:ready|complete`` — the
+      rev2 state map (``_REV2_STATE_MAP``).
+    - anything else, including every ``orchestration:*`` rev1 label — the
+      deprecated-note fallthrough (rev1 labels no longer dispatch at all
+      after the Stage 3 gate narrowing).
     """
     if _is_direct_body(info):
         body = _issue(info).get("body")

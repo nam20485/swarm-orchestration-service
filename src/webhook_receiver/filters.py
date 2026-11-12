@@ -17,12 +17,17 @@ import os
 
 _EVENT_ALLOW: set[str] = {"issues"}
 _ACTION_ALLOW: set[str] = {"labeled"}
-# Both colon-prefixed namespaces are dispatch-trigger label spaces: every
-# ``orchestration:*`` and ``gh-issue-tracking:*`` label maps to a workflow
-# step in the external agent-instructions repo. The gh-issue-tracking
-# hierarchy taxonomy uses BARE names (plan/epic/story/task — see skill
-# labels.json), so these prefixes never collide with organizational labels.
-_LABEL_PREFIXES: tuple[str, ...] = ("orchestration:", "gh-issue-tracking:")
+# The ``gh-issue-tracking:`` prefix is the rev2 dispatch-trigger label space:
+# every ``gh-issue-tracking:*`` label maps to a workflow step in the external
+# agent-instructions repo, and the hierarchy taxonomy uses BARE names
+# (plan/epic/story/task — see skill labels.json), so the prefix never
+# collides with organizational labels. The deprecated rev1 ``orchestration:``
+# prefix was REMOVED here (rev2 Stage 3, owner 2026-10-24 allow-only
+# decision): the three gate allowlists (event type, trigger label, direct-body
+# senders) are the whole dispatch surface, and rev1 labels now filter like any
+# other non-workflow label — new trigger vocabulary dispatches exactly when we
+# deliberately add it to an allowlist.
+_LABEL_PREFIXES: tuple[str, ...] = ("gh-issue-tracking:",)
 _LABEL_EXACT: set[str] = {"implementation:ready", "implementation:complete"}
 
 # The ``gh-issue-tracking:direct-body`` label dispatches the ENTIRE issue body

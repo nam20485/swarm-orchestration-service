@@ -22,8 +22,8 @@ POST /webhooks/github
      |                         direct-body sender allowlist)
   v
 PromptInfo envelope (frozen pydantic, delivery-id dedup window 1024)
-  prompt filled at enqueue by prompt_builder.py (open-ended orchestration
-  direction per label class; the direct-body label runs the issue body
+  prompt filled at enqueue by prompt_builder.py (canonical rev2 state map
+  per label class; the direct-body label runs the issue body
   verbatim)
   v
 PromptQueue consumer (asyncio.Queue, FIFO)              prompt_queue.py

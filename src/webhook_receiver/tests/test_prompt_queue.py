@@ -24,8 +24,8 @@ SECRET = "FAKE-WEBHOOK-SECRET-FOR-TESTING"
 VALID_PAYLOAD = {
     "action": "labeled",
     "sender": {"login": "nam20485"},
-    "label": {"name": "orchestration:plan"},
-    "issue": {"number": 1, "labels": [{"name": "orchestration:plan"}]},
+    "label": {"name": "gh-issue-tracking:init-success"},
+    "issue": {"number": 1, "labels": [{"name": "gh-issue-tracking:init-success"}]},
     "repository": {"full_name": "owner/repo"},
 }
 
@@ -51,7 +51,7 @@ def make_info(delivery_id: str = "d-1", **overrides: object) -> PromptInfo:
         "repo": "owner/repo",
         "event": "issues",
         "action": "labeled",
-        "label": "orchestration:plan",
+        "label": "gh-issue-tracking:init-success",
         "payload": dict(VALID_PAYLOAD),
     }
     fields.update(overrides)
@@ -96,7 +96,7 @@ class TestPromptInfoEnvelope:
                 repo="owner/repo",
                 event="issues",
                 action="labeled",
-                label="orchestration:plan",
+                label="gh-issue-tracking:init-success",
                 payload={},
             )
 
@@ -179,7 +179,7 @@ class TestPromptQueueConsumer:
         consumed = events_of_type(store, "prompt_consumed")
         assert consumed[0]["data"]["id"] == info.id
         assert consumed[0]["data"]["repo"] == "owner/repo"
-        assert consumed[0]["data"]["label"] == "orchestration:plan"
+        assert consumed[0]["data"]["label"] == "gh-issue-tracking:init-success"
 
     def test_failure_records_ok_false_without_retry(self) -> None:
         class FailingStore(EventStore):

@@ -18,8 +18,8 @@ SECRET = "FAKE-WEBHOOK-SECRET-FOR-TESTING"
 VALID_PAYLOAD = {
     "action": "labeled",
     "sender": {"login": "nam20485"},
-    "label": {"name": "orchestration:plan"},
-    "issue": {"number": 1, "labels": [{"name": "orchestration:plan"}]},
+    "label": {"name": "gh-issue-tracking:init-success"},
+    "issue": {"number": 1, "labels": [{"name": "gh-issue-tracking:init-success"}]},
     "repository": {"full_name": "owner/repo"},
 }
 
@@ -159,7 +159,7 @@ class TestEnqueuedPrompt:
         info = queue.enqueued[0]
         assert info.prompt is not None
         assert "owner/repo" in info.prompt
-        assert "orchestration:plan" in info.prompt
+        assert "gh-issue-tracking:init-success" in info.prompt
         assert "live tracking state" in info.prompt
 
     def test_direct_body_enqueues_body_verbatim(self, store: EventStore, monkeypatch) -> None:

@@ -76,10 +76,14 @@ Label an issue as a human (bot actors are ignored) with a workflow label:
 
 | Label | Dispatch behavior |
 |---|---|
-| `orchestration:*` | lifecycle workflows (e.g. `orchestration:plan-approved`); body-named dynamic dispatch within the namespace |
-| `gh-issue-tracking:*` | hierarchy workflows (init, plan/epic/story lifecycle) |
-| `implementation:ready`, `implementation:complete` | implementation path on an already-tracked app |
+| `gh-issue-tracking:*` | hierarchy workflows (init, plan/epic/story lifecycle); the prompt carries the canonical rev2 state map |
+| `implementation:ready`, `implementation:complete` | implementation path on an already-tracked app (story cycle per the state map) |
 | `gh-issue-tracking:direct-body` | the **issue body verbatim** as the agent prompt — only from senders in `DIRECT_BODY_ALLOWED_SENDERS` |
+
+Deprecated rev1 `orchestration:*` labels no longer dispatch (allow-only gate,
+rev2 Stage 3) — they filter like any other non-workflow label; new trigger
+vocabulary dispatches exactly when it is deliberately added to the gate
+allowlist.
 
 The webhook returns `202` immediately; work happens in the background. The
 agent reads live tracking state (`gh issue list`, `gh pr list`, …), does the
