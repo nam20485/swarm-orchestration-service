@@ -167,7 +167,11 @@ class TestMapByteParity:
             Path(__file__).resolve().parents[3] / "docs" / "plans"
             / "rev2-state-map-design.md"
         ).read_text(encoding="utf-8")
-        block = re.search(r"```text\n(.*?)```", doc, re.S).group(1)
+        # Anchor to §2 specifically: the doc has exactly one fenced text
+        # block today, but a future fenced example folded into an earlier
+        # section must not silently retarget this guard to the wrong block.
+        section2 = doc.split("## 2.", 1)[1]
+        block = re.search(r"```text\n(.*?)```", section2, re.S).group(1)
         assert block == _REV2_STATE_MAP
 
 
