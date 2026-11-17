@@ -141,6 +141,35 @@ class TestMapContracts:
         p = norm(build_orchestration_prompt(make_info("implementation:ready")))
         assert "First action: status comment" in p
 
+    def test_turn_bounded_rule_present(self) -> None:
+        # Decision 12 (xray45 stall, owner 2026-11-16): a session is a
+        # transition function, never a suspended process — the row forbids
+        # ending a turn awaiting a background result and blesses the two
+        # correct shapes (in-turn polling, or transition-now + next-run
+        # verification).
+        p = norm(build_orchestration_prompt(make_info("implementation:ready")))
+        assert "A run is turn-bounded" in p
+        assert "you will never be resumed" in p
+        assert "poll it to completion inside your turn" in p
+        assert "let the next run verify the outcome" in p
+        assert "Waiting is expressed as states (labels), never as suspension" in p
+
+
+class TestMapByteParity:
+    """The design doc's §2 fenced block IS the shipped map: the constant and
+    the doc must never diverge (a one-sided edit is the exact drift this
+    guards — the map is transcribed, not generated)."""
+
+    def test_state_map_constant_matches_design_doc_block(self) -> None:
+        from pathlib import Path
+
+        doc = (
+            Path(__file__).resolve().parents[3] / "docs" / "plans"
+            / "rev2-state-map-design.md"
+        ).read_text(encoding="utf-8")
+        block = re.search(r"```text\n(.*?)```", doc, re.S).group(1)
+        assert block == _REV2_STATE_MAP
+
 
 class TestRowPresence:
     """§3 row presence: each state's canonical next transition, per class."""

@@ -154,6 +154,11 @@ Standing mechanics (every state):
 - Labels are the pipeline's clock: apply ONLY the designed next-transition
   label, with the account you hold — each label application re-enters the
   dispatch gate.
+- A run is turn-bounded — you will never be resumed: never end your turn
+  awaiting a result (background job, CI run, validation). Either poll it to
+  completion inside your turn (each poll keeps the run alive), or apply the
+  transition now and let the next run verify the outcome from live state.
+  Waiting is expressed as states (labels), never as suspension.
 - Publish & verify: non-default branch + PR, never push the default branch;
   verify remote reachability before declaring done; close the triggering
   issue only on success.
