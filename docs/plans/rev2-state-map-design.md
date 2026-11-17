@@ -150,6 +150,11 @@ Standing mechanics (every state):
 - Labels are the pipeline's clock: apply ONLY the designed next-transition
   label, with the account you hold — each label application re-enters the
   dispatch gate.
+- A run is turn-bounded — you will never be resumed: never end your turn
+  awaiting a result (background job, CI run, validation). Either poll it to
+  completion inside your turn (each poll keeps the run alive), or apply the
+  transition now and let the next run verify the outcome from live state.
+  Waiting is expressed as states (labels), never as suspension.
 - Publish & verify: non-default branch + PR, never push the default branch;
   verify remote reachability before declaring done; close the triggering
   issue only on success.
@@ -515,3 +520,14 @@ Decisions 1–8 are carried content-level from #53's plan doc
     clone's `.agents/rules/` say HOW; `.agents/memory.md` records WHAT HAPPENED. Sessions
     orient from memory first and append a dated learning before ending; lessons that should
     govern future runs are rules-file edits riding the run's PR.
+12. **A run is turn-bounded — no suspension** (owner 2026-11-16, from the xray45 Stage-4
+    stall) — a session is a transition function, not a process that suspends: the xray45
+    epic-rollup run ended its turn awaiting an opencode background validation ("I'll be
+    resumed when it completes" — true in the interactive TUI, false in headless ACP, where
+    nothing wakes a session and only a label application starts the next one), so the next
+    `implementation:ready` was never applied and the ladder paused forever with everything
+    green. The map's standing mechanics now codify the rule: never end a turn awaiting a
+    result — poll it to completion in-turn (each poll is a heartbeat; the seven successful
+    story cycles polled CI exactly this way) or apply the transition now and let the next
+    run verify from live state. Waiting is expressed as states (labels), never as
+    suspension; any state not written to GitHub is a state the machine cannot see.
