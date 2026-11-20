@@ -31,10 +31,11 @@
     background: #0d1117; color: #c9d1d9; border: 1px solid #21262d;
     border-radius: 6px; padding: .3rem .6rem; font: inherit; width: 18rem;
   }
-  .bar button, button.export {
+  .bar button, button.export, #back-top {
     background: #21262d; color: #c9d1d9; border: 1px solid #30363d;
     border-radius: 6px; padding: .3rem .8rem; cursor: pointer; font: inherit;
   }
+  #back-top { position: fixed; right: 1rem; bottom: 1rem; z-index: 10; }
   #detail h3 { display: flex; align-items: center; gap: .5rem; }
   #detail h3 button.export { margin-left: auto; font-size: .8rem; padding: .15rem .6rem; }
   table { border-collapse: collapse; width: 100%; }
@@ -87,6 +88,7 @@
       <button id="live-pause">pause</button>
       <button id="live-latest" hidden>↓ latest</button>
       <button id="live-export">export</button>
+      <label class="dim"><input type="checkbox" id="live-expand-chunks"> expand agent_message_chunks</label>
       <span class="dim" id="live-count"></span>
     </div>
     <table><thead><tr>
@@ -115,6 +117,7 @@
     <p class="empty" id="hooks-empty">no webhook events recorded yet</p>
   </section>
 </main>
+<button id="back-top" hidden>top</button>
 <script>
 "use strict";
 // ALL dynamic values go through textContent — event payloads are
@@ -184,6 +187,8 @@ const updateLiveCount = () => {
 const atBottom = () =>
   window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 140;
 const syncLatestPill = () => { $("live-latest").hidden = atBottom(); };
+const syncBackTop = () => { $("back-top").hidden = window.scrollY < 300; };
+const syncScrollControls = () => { syncLatestPill(); syncBackTop(); };
 const rowFor = (item) => {
   const tr = document.createElement("tr");
   tr._key = item.key ?? `id:${item.id}`;
@@ -199,11 +204,25 @@ const rowFor = (item) => {
   const dataCell = document.createElement("td");
   dataCell.className = "wrap";
   if (item.merged !== undefined) {
+    // coalesced chunk stream: toggle summary (×N + one-line preview) over the
+    // full text in a pre — pre-wrap keeps the fragment newlines visible
+    const details = document.createElement("details");
+    wireExpansion(details, `live:merged:${item.key}`, $("live-expand-chunks").checked);
+    const summary = document.createElement("summary");
     const tag = document.createElement("span");
     tag.className = "dim";
     tag.textContent = `×${item.count} `;
-    dataCell.appendChild(tag);
-    dataCell.appendChild(document.createTextNode(item.merged));
+    tag.title = `${item.count} coalesced fragments`;
+    summary.appendChild(tag);
+    const text = String(item.merged);
+    const preview = text.slice(0, 120).replace(/\n/g, " ") +
+      (text.length > 120 ? "…" : "");
+    summary.appendChild(document.createTextNode(preview));
+    details.appendChild(summary);
+    const pre = document.createElement("pre");
+    pre.textContent = text;
+    details.appendChild(pre);
+    dataCell.appendChild(details);
   } else {
     appendData(dataCell, item);
   }
@@ -221,12 +240,17 @@ const renderLive = () => {
   updateLiveCount();
   for (const item of shown) body.appendChild(rowFor(item));
   if (stick) window.scrollTo({ top: document.documentElement.scrollHeight });
-  syncLatestPill();
+  syncScrollControls();
 };
 const expandedIds = new Set(); // survives tbody rebuilds mid-stream
-const wireExpansion = (details, key) => {
-  details.open = expandedIds.has(key);
+// dominated = the expand-all checkbox forces this row open; its toggles must
+// not record state, or a programmatic open would keep the row open after the
+// checkbox is unchecked. Captured at build time so late toggle events from
+// detached (rebuilt) rows are ignored too.
+const wireExpansion = (details, key, dominated = false) => {
+  details.open = dominated || expandedIds.has(key);
   details.addEventListener("toggle", () => {
+    if (dominated) return;
     if (details.open) expandedIds.add(key);
     else expandedIds.delete(key);
   });
@@ -296,8 +320,10 @@ const connect = () => {
       const head = liveItems[0];
       let mergedIntoHead = false;
       if (key && head && head.key === key) {
-        head.merged = ((head.merged ?? String((head.data || {}).text ?? "")) +
-                       String((data || {}).text ?? "")).slice(-1500);
+        // no tail truncation: the buffer keeps the whole stream so the head
+        // of a long message survives in the live tab (and in the export)
+        head.merged = (head.merged ?? String((head.data || {}).text ?? "")) +
+                      String((data || {}).text ?? "");
         head.count = (head.count ?? 1) + 1;
         head.ts = ts;
         head.id = ev.lastEventId;
@@ -327,19 +353,23 @@ const connect = () => {
         return;
       }
       if (stick) window.scrollTo({ top: document.documentElement.scrollHeight });
-      syncLatestPill();
+      syncScrollControls();
     });
   }
 };
 $("live-filter").addEventListener("input", renderLive);
+$("live-expand-chunks").addEventListener("change", renderLive);
 $("live-pause").addEventListener("click", () => {
   paused = !paused;
   $("live-pause").textContent = paused ? "resume" : "pause";
   if (!paused) renderLive();
 });
-window.addEventListener("scroll", syncLatestPill, { passive: true });
+window.addEventListener("scroll", syncScrollControls, { passive: true });
 $("live-latest").addEventListener("click", () => {
   window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" });
+});
+$("back-top").addEventListener("click", () => {
+  window.scrollTo({ top: 0, behavior: "smooth" });
 });
 $("live-export").addEventListener("click", () => {
   // oldest-first, one event per line — same shape as events.jsonl; a
