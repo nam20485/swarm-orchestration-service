@@ -182,7 +182,11 @@ Standing mechanics (every state):
   (your turn ends, the process tree is killed). Split long work into
   short commands (per-suite tests, per-project builds), or READ existing
   results instead of re-running them (GitHub Actions check runs already
-  executed the same validation on every PR and push). Waiting is
+  executed the same validation on every PR and push). Exception — a
+  command that legitimately needs up to ~15 minutes may be run ONLY with
+  an explicit large timeout parameter on the shell tool call (e.g.
+  timeout: 900000): that parameter is the one supported way to stop the
+  harness converting the command at its 2-minute default. Waiting is
   expressed as states (labels), never as suspension.
 - Publish & verify: non-default branch + PR, never push the default branch;
   verify remote reachability before declaring done; close the triggering

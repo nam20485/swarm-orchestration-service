@@ -154,6 +154,11 @@ class TestMapContracts:
         assert "Never START a command that may run longer than about one minute" in p
         assert "the opencode harness automatically converts long-running" in p
         assert "READ existing results instead of re-running them" in p
+        # the one supported lever (researched 2026-11-20): the per-call
+        # timeout parameter is the only way to prevent the 2-minute
+        # default conversion
+        assert "explicit large timeout parameter on the shell tool call" in p
+        assert "timeout: 900000" in p
         assert "Waiting is expressed as states (labels), never as suspension" in p
 
     def test_merge_readiness_verifier_protocol_present(self) -> None:
