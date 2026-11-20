@@ -34,6 +34,10 @@
             v2; the template's per-tier models are kept in the template for
             non-orchestrator interactive clones)
       4. import-labels.ps1 -Repo "$Owner/$RepoName"
+       4.5. import-ruleset.ps1 -Repo "$Owner/$RepoName"
+          (branch-protection ruleset: required `validate` check, empty bypass
+            list, merge-commit merges only — the mechanical merge gate, rev2
+            Decision 14; GitHub refuses red merges regardless of agent claims)
           -LabelsFile <this repo>/.github/.labels.json
       5. trigger-gh-issue-tracking-init.ps1 -Repo "$Owner/$RepoName"
           -BootstrapLabelsFile <this repo>/.github/.labels.json
@@ -164,9 +168,10 @@ $permScript = Join-Path $scriptDir 'apply-headless-permissions.ps1'
 $modelScript = Join-Path $scriptDir 'strip-model-settings.ps1'
 $triggerScript = Join-Path $scriptDir 'trigger-gh-issue-tracking-init.ps1'
 $importLabelsScript = Join-Path $scriptDir 'import-labels.ps1'
+$importRulesetScript = Join-Path $scriptDir 'import-ruleset.ps1'
 $repoFunctionsScript = Join-Path $scriptDir 'repo-functions.ps1'
 
-foreach ($required in @($createRepoScript, $cleanupScript, $permScript, $modelScript, $triggerScript, $importLabelsScript, $repoFunctionsScript)) {
+foreach ($required in @($createRepoScript, $cleanupScript, $permScript, $modelScript, $triggerScript, $importLabelsScript, $importRulesetScript, $repoFunctionsScript)) {
     if (-not (Test-Path -LiteralPath $required)) {
         throw "Required script not found: $required"
     }
@@ -326,6 +331,20 @@ foreach ($clonePath in $clonePaths) {
     & $importLabelsScript @importParams
     if ($LASTEXITCODE -ne 0) {
         throw "import-labels.ps1 failed (exit code $LASTEXITCODE) on $repoFullName."
+    }
+    Write-Host ' done' -ForegroundColor Green
+
+    # Step 4.5: Import the branch-protection ruleset (the MECHANICAL merge
+    # gate, rev2 Decision 14): GitHub itself refuses any merge into the
+    # default branch while the required `validate` check is red — no bypass
+    # actors, merge-commit merges only. Runs AFTER the seed push (required
+    # checks reject direct pushes without CI) and is idempotent.
+    Write-Host "Importing branch-protection ruleset into $repoFullName..." -ForegroundColor Cyan
+    $rulesetParams = @{ Repo = $repoFullName }
+    if ($DryRun) { $rulesetParams['DryRun'] = $true }
+    & $importRulesetScript @rulesetParams
+    if ($LASTEXITCODE -ne 0) {
+        throw "import-ruleset.ps1 failed (exit code $LASTEXITCODE) on $repoFullName."
     }
     Write-Host ' done' -ForegroundColor Green
 
