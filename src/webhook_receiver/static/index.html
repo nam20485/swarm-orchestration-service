@@ -207,7 +207,10 @@ const rowFor = (item) => {
     // coalesced chunk stream: toggle summary (×N + one-line preview) over the
     // full text in a pre — pre-wrap keeps the fragment newlines visible
     const details = document.createElement("details");
-    wireExpansion(details, `live:merged:${item.key}`, $("live-expand-chunks").checked);
+    // anchorId = first fragment's id: a stream interrupted by other events
+    // yields sibling rows with the same stream key — they must not share
+    // expansion state, and item.id alone changes with every fragment.
+    wireExpansion(details, `live:merged:${item.key}:${item.anchorId}`, $("live-expand-chunks").checked);
     const summary = document.createElement("summary");
     const tag = document.createElement("span");
     tag.className = "dim";
@@ -329,7 +332,7 @@ const connect = () => {
         head.id = ev.lastEventId;
         mergedIntoHead = true;
       } else {
-        liveItems.unshift({ id: ev.lastEventId, ts, type, data, key,
+        liveItems.unshift({ id: ev.lastEventId, anchorId: ev.lastEventId, ts, type, data, key,
                             merged: key ? String((data || {}).text ?? "") : undefined,
                             count: key ? 1 : undefined });
       }

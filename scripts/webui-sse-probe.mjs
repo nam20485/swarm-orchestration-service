@@ -24,7 +24,7 @@ import path from "node:path";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const HTML_PATH = path.resolve(HERE, "..", "src", "webhook_receiver", "static", "index.html");
-const PORT = 4179;
+const PORT = 0; // ephemeral — a fixed port collides with stray/parallel runs
 const expand = process.argv.includes("--expand");
 const INJECT =
   '<script>document.getElementById("live-expand-chunks").click();</script>';
@@ -62,9 +62,12 @@ const server = createServer((req, res) => {
 });
 
 const listen = () =>
-  new Promise((resolve) => server.listen(PORT, "127.0.0.1", resolve));
+  new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(PORT, "127.0.0.1", () => resolve(server.address().port));
+  });
 
-const dumpDom = (profile) => new Promise((resolve) => {
+const dumpDom = (profile, port) => new Promise((resolve) => {
   const args = [
     "--headless=new",
     "--disable-gpu",
@@ -73,7 +76,7 @@ const dumpDom = (profile) => new Promise((resolve) => {
     `--user-data-dir=${profile}`,
     "--virtual-time-budget=6000",
     "--dump-dom",
-    `http://127.0.0.1:${PORT}/`,
+    `http://127.0.0.1:${port}/`,
   ];
   // ASYNC spawn with FILE redirection — two deadlocks avoided:
   // 1. spawnSync would freeze this process's event loop, so the SSE/HTTP
@@ -106,10 +109,10 @@ const assert = (label, ok) => {
 };
 
 const main = async () => {
-  await listen();
+  const port = await listen();
   const profile = mkdtempSync(path.join(tmpdir(), "webui-sse-probe-"));
   try {
-    const run = await dumpDom(profile);
+    const run = await dumpDom(profile, port);
     if (run.error) {
       console.log(`FAIL  chrome not runnable: ${run.error.message}`);
       return 1;
@@ -146,4 +149,7 @@ const main = async () => {
   }
 };
 
-process.exitCode = await main();
+process.exitCode = await main().catch((err) => {
+  console.log(`FAIL  probe error: ${err.message}`);
+  return 1;
+});
