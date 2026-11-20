@@ -21,6 +21,13 @@ Two states, two places:
     charlie68 follow-ups. Supersedes PR #53's mechanical design (kept for
     posterity); the vendored reference prompt lives at
     `docs/reference/orchestration_prompt.jinja2.md`.
+  - [`opencode-auto-background-research.md`](opencode-auto-background-research.md) —
+    COMPLETE (2026-11-20, researcher report): opencode 2.3.2 auto-converts foreground
+    shell commands to background jobs at a hardcoded 2-minute timeout AND instructs the
+    model to end its turn — no config kill-switch exists; the per-call `timeout`
+    parameter is the only lever. Also pins the mcp-agent-mail config source (a
+    home-level `~/opencode.json` inherited by every project; fixed). Evidence base for
+    map Decisions 13/14 and the turn-bounded row's final wording.
   - [`grandparent-upstream-graft.md`](grandparent-upstream-graft.md) — PARKED,
     trigger-gated (only when something is needed from the grandparent repo).
   - [`turing-alpha-bot-account.md`](turing-alpha-bot-account.md) — PROPOSED;

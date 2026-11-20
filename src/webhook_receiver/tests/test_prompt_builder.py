@@ -142,21 +142,52 @@ class TestMapContracts:
         assert "First action: status comment" in p
 
     def test_turn_bounded_rule_present(self) -> None:
-        # Decision 12 (xray45 stalls 2026-11-12 + 2026-11-17 recurrence):
-        # a session is a transition function, never a suspended process —
-        # no completion notification exists, background output is outside
-        # the workspace (unreadable), and the turn ends only after this
-        # unit's labels are applied. Long checks run FOREGROUND (inside the
-        # idle budget) or the transition is applied now and the NEXT run
-        # verifies.
+        # Decision 12 as amended 2026-11-20 (third stall): the model cannot
+        # control the opencode harness's automatic conversion of long
+        # commands to background processes, so the rule constrains what the
+        # session STARTS — nothing over ~1 minute — and directs verification
+        # at existing GitHub Actions results.
         p = norm(build_orchestration_prompt(make_info("implementation:ready")))
         assert "A run is turn-bounded" in p
         assert "you will never be resumed" in p
         assert "no completion notification exists here" in p
-        assert "never use background execution" in p
-        assert "Run long checks in the FOREGROUND" in p
-        assert "let the next run verify the outcome" in p
+        assert "Never START a command that may run longer than about one minute" in p
+        assert "the opencode harness automatically converts long-running" in p
+        assert "READ existing results instead of re-running them" in p
+        # the one supported lever (researched 2026-11-20): the per-call
+        # timeout parameter is the only way to prevent the 2-minute
+        # default conversion
+        assert "explicit large timeout parameter on the shell tool call" in p
+        assert "timeout: 900000" in p
         assert "Waiting is expressed as states (labels), never as suspension" in p
+
+    def test_merge_readiness_verifier_protocol_present(self) -> None:
+        # Decision 14 (owner 2026-11-20): the merging session does not
+        # self-certify — two independent verifier subagents run the
+        # explicit checklist and report raw command output as evidence;
+        # merge requires their agreement plus the mechanical gate.
+        p = norm(build_orchestration_prompt(make_info("implementation:complete")))
+        assert "TWO independent verifier subagents" in p
+        assert "RAW command output as evidence" in p
+        assert "merge only when both verifiers agree" in p
+        # the explicit checklist, spelled out
+        assert "mergeStateStatus=CLEAN" in p
+        assert "check-runs" in p
+        assert "conclusion=SUCCESS" in p
+        assert "checks on an older SHA are stale" in p
+
+    def test_rollup_verifies_via_ci_not_local_gate(self) -> None:
+        # Decision 13 (owner 2026-11-20): epic rollups READ the GitHub
+        # Actions check runs for the merged commit — CI already ran the
+        # identical ./validation.ps1 — and never run the local full gate.
+        p = norm(
+            build_orchestration_prompt(
+                make_info("gh-issue-tracking:epic-implemented")
+            )
+        )
+        assert "READING the GitHub Actions check runs" in p
+        assert "the CI workflow already ran the identical ./validation.ps1" in p
+        assert "do NOT run ./validation.ps1" in p
 
 
 class TestMapByteParity:

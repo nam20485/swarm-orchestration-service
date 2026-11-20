@@ -117,19 +117,39 @@ completion, what to do and which label advances the cycle.`
   done. Drive it to merged: dispatch 2–3 subagent reviewers to review the
   PR and post comments for found issues, then run /resolve-pr-comments
   until unresolved threads = 0 and /fix-failing-workflows until checks are
-  green; re-read thread state on the head SHA before merging. Merge gate:
-  ALL checks GREEN + MERGEABLE + zero unresolved threads — otherwise no
-  merge; escalate only when there is no path to resolution. After 3 failed
-  review/fix rounds: park the PR with `needs-owner` and stop. On merge:
-  close the story, then apply `implementation:ready` to the epic's next
-  open story — or, if it was the last, apply
+  green; re-read thread state on the head SHA before merging. Before the
+  merge call, dispatch TWO independent verifier subagents (separate from
+  the code reviewers) that each run the merge-readiness checklist below
+  and report the RAW command output as evidence — merge only when both
+  verifiers agree on every field, and quote their evidence in the merge
+  status comment. Merge-readiness checklist (exact commands, expected
+  results): (1) `gh pr view <n> --json state,mergeable,mergeStateStatus,
+  baseRefName,headRefOid` → state=OPEN, mergeable=true,
+  mergeStateStatus=CLEAN, base = the repo's default branch; record the
+  headRefOid (the head commit SHA). (2) `gh api repos/<owner>/<repo>/
+  commits/<headRefOid>/check-runs` → EVERY check run for THAT EXACT SHA:
+  status=COMPLETED and conclusion=SUCCESS; conclusion=SKIPPED is
+  acceptable only for the `droid` check (tag-only, inert); any FAILURE,
+  TIMED_OUT, CANCELLED, or still-running check = NOT READY; checks on an
+  older SHA are stale — re-verify after any push. (3) unresolved review
+  threads on the PR = 0 (GraphQL reviewThreads). Merge gate: ALL checks
+  GREEN + MERGEABLE + zero unresolved threads + both verifiers agree —
+  otherwise no merge; escalate only when there is no path to resolution.
+  After 3 failed review/fix rounds: park the PR with `needs-owner` and
+  stop. On merge: close the story, then apply `implementation:ready` to
+  the epic's next open story — or, if it was the last, apply
   `gh-issue-tracking:epic-implemented` to the epic.
 
 - gh-issue-tracking:epic-implemented (on an epic) — one epic done. Review
-  that epic's merged PRs (review-epic-prs), post a progress report on the
-  Plan issue, close the epic. On completion: apply `implementation:ready`
-  to the next unimplemented unit; none left → the plan is fully
-  implemented: post the final summary and close the Plan issue. TERMINAL.
+  that epic's merged PRs (review-epic-prs); verify the epic by READING the
+  GitHub Actions check runs for the epic's last merged commit (`gh api
+  repos/<owner>/<repo>/commits/<sha>/check-runs` — the CI workflow
+  already ran the identical ./validation.ps1 gate on every PR and every
+  push); do NOT run ./validation.ps1 or any other full local gate in this
+  run. Post a progress report on the Plan issue, close the epic. On
+  completion: apply `implementation:ready` to the next unimplemented
+  unit; none left → the plan is fully implemented: post the final summary
+  and close the Plan issue. TERMINAL.
 
 - any other dispatch label (on any issue) — deprecated rev1 vocabulary
   (all `orchestration:*`; after Stage 3's gate narrowing these should never
@@ -152,14 +172,18 @@ Standing mechanics (every state):
   dispatch gate.
 - A run is turn-bounded — you will never be resumed: no completion
   notification exists here, and a turn ends only after this unit's labels
-  are applied. Never end your turn awaiting a result (CI run, validation,
-  build), and never use background execution — its output file lives
-  outside your workspace, unreadable, and nothing will wake you when it
-  finishes. Run long checks in the FOREGROUND (streaming output keeps the
-  idle watchdog fed; anything under ~10 minutes is well inside the idle
-  budget), or apply the transition now and let the next run verify the
-  outcome from live state. Waiting is expressed as states (labels), never
-  as suspension.
+  are applied. Never START a command that may run longer than about one
+  minute: the opencode harness automatically converts long-running
+  commands into background processes whose result can never reach you
+  (your turn ends, the process tree is killed). Split long work into
+  short commands (per-suite tests, per-project builds), or READ existing
+  results instead of re-running them (GitHub Actions check runs already
+  executed the same validation on every PR and push). Exception — a
+  command that legitimately needs up to ~15 minutes may be run ONLY with
+  an explicit large timeout parameter on the shell tool call (e.g.
+  timeout: 900000): that parameter is the one supported way to stop the
+  harness converting the command at its 2-minute default. Waiting is
+  expressed as states (labels), never as suspension.
 - Publish & verify: non-default branch + PR, never push the default branch;
   verify remote reachability before declaring done; close the triggering
   issue only on success.
@@ -551,3 +575,38 @@ Decisions 1–8 are carried content-level from #53's plan doc
     foreground (streaming output feeds the watchdog; sub-10-minute checks fit the idle
     budget) — alongside the unchanged transition-now shape. The impossible "poll it"
     option is removed.
+
+    **Third stall + final amendment (2026-11-20, xray45 Epic-3 rollup re-fire, run
+    `2c37cf18`)**: the no-background row was live in the prompt and the session issued a
+    plain FOREGROUND command (`pwsh -NoProfile -File ./validation.ps1 2>&1 | tail -40`,
+    no `&`, no nohup — fact from the event log); the tool call stayed `in_progress`, the
+    model ended its turn saying "waiting on the background validation." Conclusion: the
+    session cannot control whether the opencode harness converts a long command into a
+    background process — instructing the model about it is unenforceable. The rule now
+    constrains what the session STARTS (see Decision 13).
+
+13. **Rollup verification reads CI; no long local commands** (owner 2026-11-20) — the CI
+    workflow on every clone runs the IDENTICAL `./validation.ps1` on GitHub-hosted
+    runners, on every pull request and every push to the default branch (verified in
+    xray45's `.github/workflows/ci.yml`: the `validate` job's "Run validation" step is
+    literally `./validation.ps1`). Epic-rollup runs therefore VERIFY BY READING the
+    GitHub Actions check runs for the merged commit (`gh api …/commits/<sha>/check-runs`)
+    and never run the local full gate; the standing mechanics forbid STARTING any command
+    that may run longer than about one minute (the harness auto-converts longer commands
+    to background processes whose result can never reach a dispatched session). Long
+    local work is split into short commands or skipped in favor of reading CI results.
+14. **Merge readiness is certified by independent verifiers, not self-report** (owner
+    2026-11-20) — the session that implemented a story also drives its PR to merge, so
+    its own reading of CI status is a self-report and can be wrong or fabricated. Before
+    any merge call, TWO independent verifier subagents (separate from the code reviewers)
+    each run an explicit checklist and report the RAW command output as evidence:
+    (1) `gh pr view --json state,mergeable,mergeStateStatus,baseRefName,headRefOid` →
+    OPEN / mergeable=true / CLEAN / correct base; record the head SHA; (2) `gh api
+    …/commits/<head SHA>/check-runs` → every check COMPLETED+SUCCESS for THAT EXACT SHA
+    (SKIPPED tolerated only for the inert `droid` tag check; older-SHA checks are
+    stale); (3) unresolved review threads = 0. The orchestrator merges only when both
+    verifiers agree on every field and quotes their evidence in the merge status
+    comment. Proposed mechanical backstop (not yet implemented): the launcher stamps a
+    branch-protection ruleset on every new clone requiring the `validate` check with an
+    EMPTY bypass list, so GitHub itself refuses a merge when CI is red regardless of
+    what any session claims.
