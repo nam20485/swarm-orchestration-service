@@ -150,11 +150,16 @@ Standing mechanics (every state):
 - Labels are the pipeline's clock: apply ONLY the designed next-transition
   label, with the account you hold — each label application re-enters the
   dispatch gate.
-- A run is turn-bounded — you will never be resumed: never end your turn
-  awaiting a result (background job, CI run, validation). Either poll it to
-  completion inside your turn (each poll keeps the run alive), or apply the
-  transition now and let the next run verify the outcome from live state.
-  Waiting is expressed as states (labels), never as suspension.
+- A run is turn-bounded — you will never be resumed: no completion
+  notification exists here, and a turn ends only after this unit's labels
+  are applied. Never end your turn awaiting a result (CI run, validation,
+  build), and never use background execution — its output file lives
+  outside your workspace, unreadable, and nothing will wake you when it
+  finishes. Run long checks in the FOREGROUND (streaming output keeps the
+  idle watchdog fed; anything under ~10 minutes is well inside the idle
+  budget), or apply the transition now and let the next run verify the
+  outcome from live state. Waiting is expressed as states (labels), never
+  as suspension.
 - Publish & verify: non-default branch + PR, never push the default branch;
   verify remote reachability before declaring done; close the triggering
   issue only on success.
@@ -531,3 +536,18 @@ Decisions 1–8 are carried content-level from #53's plan doc
     story cycles polled CI exactly this way) or apply the transition now and let the next
     run verify from live state. Waiting is expressed as states (labels), never as
     suspension; any state not written to GitHub is a state the machine cannot see.
+
+    **Recurrence + amendment (2026-11-17, xray45 Epic-3 rollup, run `ab7e0ba`)**: the
+    row was live in the session's prompt and still lost. First-hand sequence from the
+    run's stream: the session tried the sanctioned poll and hit *"Output file is
+    external-blocked"* — dispatched sessions are confined to the clone workspace and
+    **cannot read opencode's background-shell output** (`~/.local/share/opencode/shell/`),
+    so in-turn polling of background jobs is structurally unavailable in dispatch.
+    Cornered, it fell back to the harness prior: *"I'll be notified on completion
+    instead"* — while itself estimating the gate at "~3 min typical", comfortably inside
+    the 900 s idle budget a FOREGROUND run would have used. Amendment (owner 2026-11-20):
+    the row now **forbids background execution outright** (no notification exists here;
+    the output file is unreadable) and names the real alternative — run long checks
+    foreground (streaming output feeds the watchdog; sub-10-minute checks fit the idle
+    budget) — alongside the unchanged transition-now shape. The impossible "poll it"
+    option is removed.
