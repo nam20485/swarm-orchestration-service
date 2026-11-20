@@ -34,11 +34,12 @@
             v2; the template's per-tier models are kept in the template for
             non-orchestrator interactive clones)
       4. import-labels.ps1 -Repo "$Owner/$RepoName"
-       4.5. import-ruleset.ps1 -Repo "$Owner/$RepoName"
-          (branch-protection ruleset: required `validate` check, empty bypass
-            list, merge-commit merges only — the mechanical merge gate, rev2
-            Decision 14; GitHub refuses red merges regardless of agent claims)
           -LabelsFile <this repo>/.github/.labels.json
+       4.5. import-ruleset.ps1 -Repo "$Owner/$RepoName"
+          (branch-protection ruleset: required `validate` check with strict
+            up-to-date policy, empty bypass list, merge-commit merges only —
+            the mechanical merge gate, rev2 Decision 14; GitHub refuses red
+            and stale-green merges regardless of agent claims)
       5. trigger-gh-issue-tracking-init.ps1 -Repo "$Owner/$RepoName"
           -BootstrapLabelsFile <this repo>/.github/.labels.json
 

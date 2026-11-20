@@ -38,7 +38,10 @@ Describe 'clone ruleset asset invariants' {
         $checkRule | Should -Not -BeNullOrEmpty
         # The API field is strict_required_status_checks_policy (with the s) —
         # the misspelling is silently rejected as "data matches no possible input".
-        $checkRule['parameters']['strict_required_status_checks_policy'] | Should -BeFalse
+        # TRUE (review round 2026-11-20): the PR branch must be up to date with
+        # the base, closing the stale-green window where an outdated head's old
+        # green run merges a combination validate never tested.
+        $checkRule['parameters']['strict_required_status_checks_policy'] | Should -BeTrue
         $contexts = @($checkRule['parameters']['required_status_checks'] | ForEach-Object { $_['context'] })
         $contexts | Should -Contain 'validate'
     }

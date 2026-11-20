@@ -1,5 +1,5 @@
 {
-  "$comment": "Branch-protection ruleset imported into every orchestrator-dispatched clone by scripts/import-ruleset.ps1 (launcher stage 4.5). The required_status_checks rule is the MECHANICAL merge gate (map Decision 14): GitHub itself refuses a merge into development while the validate check (the CI job that runs the identical ./validation.ps1) is not green — regardless of what any session claims. The pull_request rule enforces MERGE-COMMIT merges only (squash and rebase disabled, owner 2026-11-20) and required review-thread resolution (the map's zero-threads gate, enforced by GitHub). bypass_actors is deliberately EMPTY (drift-guarded by tests/import-ruleset.Tests.ps1): nobody, including admin tokens, may merge around a red gate. Direct pushes that lack passing checks are rejected too — bookkeeping commits ride a PR (map standing mechanics).",
+  "$comment": "Branch-protection ruleset imported into every orchestrator-dispatched clone by scripts/import-ruleset.ps1 (launcher stage 4.5). The required_status_checks rule is the MECHANICAL merge gate (map Decision 14): GitHub itself refuses a merge into development while the validate check (the CI job that runs the identical ./validation.ps1) is not green — regardless of what any session claims. strict_required_status_checks_policy is TRUE (review round 2026-11-20): the PR branch must be up to date with development before merging, closing the stale-green window where an outdated head's old green run merges an unvalidated combination; the autonomous cycle handles the resulting 'behind' rejections by updating the PR branch (gh pr update-branch) and re-verifying. The pull_request rule enforces MERGE-COMMIT merges only (squash and rebase disabled, owner 2026-11-20) and required review-thread resolution (the map's zero-threads gate, enforced by GitHub). bypass_actors is deliberately EMPTY (drift-guarded by tests/import-ruleset.Tests.ps1): nobody, including admin tokens, may merge around a red gate. Direct pushes that lack passing checks are rejected too — bookkeeping commits ride a PR (map standing mechanics).",
   "name": "protected branches",
   "target": "branch",
   "enforcement": "active",
@@ -15,7 +15,7 @@
     {
       "type": "required_status_checks",
       "parameters": {
-        "strict_required_status_checks_policy": false,
+        "strict_required_status_checks_policy": true,
         "required_status_checks": [
           { "context": "validate" }
         ]

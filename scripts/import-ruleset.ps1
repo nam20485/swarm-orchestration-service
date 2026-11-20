@@ -6,17 +6,20 @@
 
 .DESCRIPTION
     Reads the ruleset definition (create-body shaped, exported from the
-    GitHub UI ruleset and trimmed) and ensures the target repository has
-    it. The ruleset is the MECHANICAL merge gate for orchestrator-dispatched
-    clones (docs/plans/rev2-state-map-design.md Decision 14): the required
-    `validate` status check (the CI job that runs the identical
-    ./validation.ps1 on GitHub-hosted runners) must be green for ANY merge
-    into the default branch, and bypass_actors is EMPTY — nobody, including
-    admin tokens, merges around a red gate.
+    GitHub UI ruleset and trimmed) and enforces it as DESIRED STATE on the
+    target repository. The ruleset is the MECHANICAL merge gate for
+    orchestrator-dispatched clones (docs/plans/rev2-state-map-design.md
+    Decision 14): the required `validate` status check (the CI job that
+    runs the identical ./validation.ps1 on GitHub-hosted runners) must be
+    green for ANY merge into the default branch, and bypass_actors is
+    EMPTY — nobody, including admin tokens, merges around a red gate.
 
-    Idempotent: if a ruleset with the same name already exists on the repo,
-    the definition is compared and the script reports already-present (no
-    update, no duplicate).
+    Desired-state (review round 2026-11-20): a ruleset with the same name
+    is PUT with this definition — re-running REPAIRS drift (a bypass actor
+    added via the UI, a re-enabled merge method, a loosened check policy);
+    it never silently skips a live ruleset that no longer matches the
+    committed asset. The Pester drift-guard protects the asset; this
+    script protects the live clone.
 
 .PARAMETER Repo
     Target repository in the form "owner/repo" (e.g., "intel-agency/my-app-delta12").
@@ -77,22 +80,38 @@ if ($DryRun) {
     exit 0
 }
 
-# Idempotency: a ruleset with the same name already present -> report, do not touch.
-# (Names-only jq — no embedded quotes to fight through two shells.)
-$names = & gh api "repos/$Repo/rulesets" --jq '.[].name' 2>$null
-if ($LASTEXITCODE -eq 0 -and @($names) -contains $name) {
-    Write-Host " ruleset '$name' already present on $Repo — nothing to do" -ForegroundColor DarkGray
-    exit 0
+# Desired state: a ruleset with the same name is PUT with this definition
+# (repairs drift); otherwise POST creates it. The id lookup emits "id name"
+# lines via jq string interpolation — no embedded quotes to fight through
+# the pwsh->gh boundary (gh's jq rejects env: access), matched in pwsh.
+$rulesetLines = & gh api "repos/$Repo/rulesets" --jq '.[] | "\(.id) \(.name)"' 2>$null
+$existingId = $null
+if ($LASTEXITCODE -eq 0) {
+    foreach ($line in @($rulesetLines)) {
+        if ($line -match ("^(\d+)\s+" + [regex]::Escape($name) + "$")) {
+            $existingId = $Matches[1]
+            break
+        }
+    }
 }
 
 $bodyFile = New-TemporaryFile
 try {
     $definition | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $bodyFile -Encoding utf8NoBOM
-    $created = & gh api -X POST "repos/$Repo/rulesets" --input $bodyFile --jq '.id' 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "ruleset creation failed: $created"
+    if ($LASTEXITCODE -eq 0 -and $existingId) {
+        $result = & gh api -X PUT "repos/$Repo/rulesets/$existingId" --input $bodyFile --jq '.id' 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            throw "ruleset update failed: $result"
+        }
+        Write-Host " ruleset '$name' enforced on $Repo (updated id $result) — required 'validate' + strict policy, merge-only, empty bypass" -ForegroundColor Green
     }
-    Write-Host (" ruleset '{0}' created on {1} (id {2}) — required check 'validate', empty bypass list" -f $name, $Repo, $created) -ForegroundColor Green
+    else {
+        $created = & gh api -X POST "repos/$Repo/rulesets" --input $bodyFile --jq '.id' 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            throw "ruleset creation failed: $created"
+        }
+        Write-Host (" ruleset '{0}' created on {1} (id {2}) — required check 'validate', empty bypass list" -f $name, $Repo, $created) -ForegroundColor Green
+    }
 }
 finally {
     Remove-Item -LiteralPath $bodyFile -Force -ErrorAction SilentlyContinue
