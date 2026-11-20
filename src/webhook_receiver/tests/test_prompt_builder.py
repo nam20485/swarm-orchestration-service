@@ -142,15 +142,19 @@ class TestMapContracts:
         assert "First action: status comment" in p
 
     def test_turn_bounded_rule_present(self) -> None:
-        # Decision 12 (xray45 stall, owner 2026-11-16): a session is a
-        # transition function, never a suspended process — the row forbids
-        # ending a turn awaiting a background result and blesses the two
-        # correct shapes (in-turn polling, or transition-now + next-run
-        # verification).
+        # Decision 12 (xray45 stalls 2026-11-12 + 2026-11-17 recurrence):
+        # a session is a transition function, never a suspended process —
+        # no completion notification exists, background output is outside
+        # the workspace (unreadable), and the turn ends only after this
+        # unit's labels are applied. Long checks run FOREGROUND (inside the
+        # idle budget) or the transition is applied now and the NEXT run
+        # verifies.
         p = norm(build_orchestration_prompt(make_info("implementation:ready")))
         assert "A run is turn-bounded" in p
         assert "you will never be resumed" in p
-        assert "poll it to completion inside your turn" in p
+        assert "no completion notification exists here" in p
+        assert "never use background execution" in p
+        assert "Run long checks in the FOREGROUND" in p
         assert "let the next run verify the outcome" in p
         assert "Waiting is expressed as states (labels), never as suspension" in p
 
