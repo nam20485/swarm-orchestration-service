@@ -45,14 +45,21 @@ function fmtDuration(seconds) {
 }
 
 function fmtOffset(seconds) {
+  // null/NaN: a run without a parsable manifest has no anchor for offsets
+  if (seconds == null || Number.isNaN(seconds)) return "—";
   if (seconds < 60) {
     const n = seconds < 10 ? Number(seconds.toFixed(1)) : Math.round(seconds);
     return `+${n}s`;
   }
-  return `+${Math.floor(seconds / 60)}m ${String(Math.round(seconds % 60)).padStart(2, "0")}s`;
+  // round the total before splitting, or 119.9s renders "+1m 60s"
+  const total = Math.round(seconds);
+  return `+${Math.floor(total / 60)}m ${String(total % 60).padStart(2, "0")}s`;
 }
 
-const fmtClock = (iso) => new Date(iso).toLocaleTimeString([], { hour12: false });
+const fmtClock = (iso) => {
+  const ms = Date.parse(iso);
+  return Number.isNaN(ms) ? "—" : new Date(ms).toLocaleTimeString([], { hour12: false });
+};
 const fmtTokens = (n) =>
   typeof n === "number" ? (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n)) : "—";
 const fmtCount = (n) => (typeof n === "number" ? n.toLocaleString() : "—");
@@ -204,7 +211,9 @@ function renderRunList() {
     const bottom = el("div", "run-card-bottom");
     const elapsed = fmtDuration(durationSeconds(run));
     const left = el("span", null, m.issue == null ? elapsed : `#${m.issue} · ${elapsed}`);
-    if (kind === "run") left.dataset.liveStart = m.started_at;
+    // no started_at (manifest-less run): skip the live-clock anchor instead
+    // of writing the string "undefined" into the data attribute
+    if (kind === "run" && m.started_at != null) left.dataset.liveStart = m.started_at;
     const outcome = el("span", `run-card-outcome ${kind}`);
     outcome.append(el("span", `dot ${kind}`), document.createTextNode(kind === "run" ? "running" : kind === "ok" ? "ok" : m.stop_reason || "failed"));
     bottom.append(left, outcome);

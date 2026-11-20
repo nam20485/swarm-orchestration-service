@@ -71,7 +71,20 @@ async function serveFunction(request, response, url) {
     if (["host", "connection", "content-length", "accept-encoding"].includes(key)) continue;
     if (value !== undefined) headers.set(key, Array.isArray(value) ? value.join(",") : value);
   }
-  const body = ["GET", "HEAD"].includes(request.method || "GET") ? undefined : await readBody(request);
+  let body;
+  if (!["GET", "HEAD"].includes(request.method || "GET")) {
+    try {
+      body = await readBody(request);
+    } catch {
+      // client disconnect mid-upload: the stream rejects; answer 400 instead
+      // of letting an unhandled rejection kill the dev server (Node >= 15)
+      if (!response.destroyed) {
+        response.writeHead(400, { "content-type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({ error: { code: "bad_request" } }));
+      }
+      return;
+    }
+  }
   let chatResponse;
   try {
     chatResponse = await handler(new Request(url, {

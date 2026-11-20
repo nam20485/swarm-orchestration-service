@@ -40,10 +40,12 @@ export async function fetchLiveRuns() {
 
 export async function fetchLiveRunEvents(run) {
   const events = await getJson(`/runs/${encodeURIComponent(run.run_id)}/events`);
+  // /runs omits the manifest for run dirs without a parsable manifest.json —
+  // no anchor means no offsets (null renders "—"), never NaN
   const start = Date.parse(run.manifest.started_at) / 1000;
   return events.map((event) => ({
     id: event.id,
-    at: event.ts - start,
+    at: Number.isFinite(start) ? event.ts - start : null,
     type: event.type,
     data: normalizeData(event),
   }));
