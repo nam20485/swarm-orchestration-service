@@ -300,3 +300,13 @@ class TestGlobalTailAndIndex:
         assert "swarm-orchestration" in resp.text
         # The page must render data as text, never parse it as HTML.
         assert "innerHTML" not in resp.text
+
+    def test_index_serves_chunk_expand_and_top_controls(self, tmp_path: Path) -> None:
+        client = self.make_app_client(tmp_path)
+        resp = client.get("/")
+        assert resp.status_code == 200
+        # I1a: the coalesced-chunk expansion toggle; I1b: the back-to-top control.
+        assert "live-expand-chunks" in resp.text
+        assert "expand agent_message_chunks" in resp.text
+        assert "back-top" in resp.text
+        assert "innerHTML" not in resp.text
