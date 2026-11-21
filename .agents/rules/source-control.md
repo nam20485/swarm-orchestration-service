@@ -38,7 +38,8 @@ Mechanical brakes on consequential git steps — never batch them into compound 
    readiness itself and never merges without the verifier's evidence-backed READY verdict.
 3. **Auto-review green definition.** An auto-review (Kilo) passes only when:
    `unresolved threads == 0 AND (resolved threads > 0 OR (Kilo ran AND issues found == 0))`.
-   Kilo MUST have run — a bare "pass" check bucket with no review activity is NOT green.
+   With zero resolved threads, Kilo MUST have run and found 0 issues — a bare "pass" check
+   bucket with no review activity is NOT green.
 
 Criteria the independent verifier must evidence, all on the PR's exact current head SHA:
 
