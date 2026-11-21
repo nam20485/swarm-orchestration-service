@@ -25,6 +25,34 @@ Mechanical brakes on consequential git steps — never batch them into compound 
 - **Destructive operations** (remote branch deletion, force-push, history rewrite, stash drop)
   require stating intent and consequence immediately before execution, as a standalone command.
 
+## PR merge readiness protocol (owner directive 2026-11-20 — MUST ALWAYS BE FOLLOWED)
+
+1. **Out-of-date head: update with a MERGE COMMIT only.** When GitHub reports "This branch is
+   out-of-date with the base branch", update the head via "Update with merge commit"
+   (`gh pr update-branch <N>` — merges the base into the head). **NEVER rebase a PR head onto
+   the base.** (Distinct from a branch diverged from its OWN remote, which reconciles by rebase;
+   PR-head-vs-base is merge-commit only.)
+2. **Independent verification — NEVER self-check.** Before ANY merge, dispatch an independent
+   objective subagent to verify merge readiness. It MUST present raw evidence (command output,
+   not summaries) of each criterion's passing state. The orchestrator never checks merge
+   readiness itself and never merges without the verifier's evidence-backed READY verdict.
+3. **Auto-review green definition.** An auto-review (Kilo) passes only when:
+   `unresolved threads == 0 AND (resolved threads > 0 OR (Kilo ran AND issues found == 0))`.
+   With zero resolved threads, Kilo MUST have run and found 0 issues — a bare "pass" check
+   bucket with no review activity is NOT green.
+
+Criteria the independent verifier must evidence, all on the PR's exact current head SHA:
+
+- `mergeable=MERGEABLE`, `mergeStateStatus=CLEAN`, `state=OPEN` (head up to date with base).
+- Every workflow check COMPLETED with conclusion SUCCESS on that exact SHA (inert `droid`
+  SKIPPED allowed); no failing workflow runs on the branch.
+- Auto-review green per definition 3 (thread counts via GraphQL `reviewThreads`, Kilo check
+  state, review-comment activity).
+- `reviewDecision=APPROVED`, and the approving reviewer is a collaborator with WRITE access
+  (a read-only account's approval is accepted by GitHub but does not satisfy the ruleset).
+- No bypass required: a plain `gh pr merge --merge` would succeed. `--admin` only after a
+  demonstrated unattainable blocker AND the owner's explicit permission.
+
 ## Monitor Workflows
 
 - After pushing, monitor the workflows to ensure they are running as expected.
