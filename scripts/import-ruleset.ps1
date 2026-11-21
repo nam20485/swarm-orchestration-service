@@ -84,21 +84,25 @@ if ($DryRun) {
 # (repairs drift); otherwise POST creates it. The id lookup emits "id name"
 # lines via jq string interpolation — no embedded quotes to fight through
 # the pwsh->gh boundary (gh's jq rejects env: access), matched in pwsh.
+# A FAILED listing throws (review round 2): GitHub does not enforce unique
+# ruleset names, so treating a failed lookup as "no match" could POST a
+# duplicate "protected branches" ruleset whose twin later runs never manage.
 $rulesetLines = & gh api "repos/$Repo/rulesets" --jq '.[] | "\(.id) \(.name)"' 2>$null
+if ($LASTEXITCODE -ne 0) {
+    throw "ruleset listing failed on $Repo (gh exit $LASTEXITCODE) — refusing to guess between create and update; re-run once the API call succeeds"
+}
 $existingId = $null
-if ($LASTEXITCODE -eq 0) {
-    foreach ($line in @($rulesetLines)) {
-        if ($line -match ("^(\d+)\s+" + [regex]::Escape($name) + "$")) {
-            $existingId = $Matches[1]
-            break
-        }
+foreach ($line in @($rulesetLines)) {
+    if ($line -match ("^(\d+)\s+" + [regex]::Escape($name) + "$")) {
+        $existingId = $Matches[1]
+        break
     }
 }
 
 $bodyFile = New-TemporaryFile
 try {
     $definition | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $bodyFile -Encoding utf8NoBOM
-    if ($LASTEXITCODE -eq 0 -and $existingId) {
+    if ($existingId) {
         $result = & gh api -X PUT "repos/$Repo/rulesets/$existingId" --input $bodyFile --jq '.id' 2>&1
         if ($LASTEXITCODE -ne 0) {
             throw "ruleset update failed: $result"
