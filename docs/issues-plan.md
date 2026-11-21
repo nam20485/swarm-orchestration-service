@@ -1,6 +1,10 @@
 # Issues plan — root causes, options, recommendations
 
-Status: DECISIONS RESOLVED (owner, 2026-11-20) — ready for implementation.
+Status: IMPLEMENTED — PR #64 merged as `7b8603b` (live feed, I1a/I1b), PR #65 merged as
+`1786e40` (console, I2a/I2b), 2026-11-20/21. Review rounds complete: 2 findings fixed on
+PR #64; 10 on PR #65 (3 fixed, 7 chat-subsystem deferred per decision 4 — follow-up list
+on the PR). Merge-readiness protocol (owner 2026-11-20, MUST ALWAYS BE FOLLOWED) recorded
+in [`.agents/rules/source-control.md`](../.agents/rules/source-control.md).
 Date: 2026-11-20 (analysis + owner decisions folded same day).
 Source issues: [`docs/issues.md`](issues.md) (I1a, I1b, I2a, I2b).
 Analysis performed in worktree `.qwen/worktrees/bold-ray-a5093f` @ `0895afd`; the main
