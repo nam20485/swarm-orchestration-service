@@ -72,6 +72,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import mimetypes
 from pathlib import Path
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
@@ -79,6 +80,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from webhook_receiver.acp_host import AcpHost
 from webhook_receiver.config import Settings
@@ -98,6 +100,27 @@ from webhook_receiver.trace_log import resolve_trace_root
 logger = logging.getLogger(__name__)
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+# StaticFiles derives MIME from mimetypes and a browser refuses an ES module
+# served with a non-JavaScript type. Python 3.13+ maps .mjs itself; the 3.12
+# slim image may not, so register it here (idempotent).
+mimetypes.add_type("text/javascript", ".mjs")
+
+
+def _console_web_root() -> Path | None:
+    """Ops console assets directory, or None when the assets are not packaged.
+
+    Two layouts: a host checkout (``<repo>/src/webhook_receiver/app.py`` →
+    repo root at ``parents[2]``) and the receiver image (``/app/webhook_receiver/
+    app.py`` with Dockerfile.webhook's ``COPY site/web/ ./site/web/`` → root at
+    ``parents[1]``). Module level so tests can patch it.
+    """
+    here = Path(__file__).resolve()
+    for index in (2, 1):
+        root = here.parents[index] / "site" / "web"
+        if root.is_dir():
+            return root
+    return None
 
 
 def _sse_frame(item: dict[str, Any] | None) -> str:
@@ -396,5 +419,18 @@ def create_app(
             },
             status_code=202,
         )
+
+    # Same-origin mount, so the console's CSP connect-src 'self' reaches
+    # /runs, /runs/{id}/events and /events/history unchanged. Best-effort:
+    # an unbuilt or unpackaged console never blocks the listener starting.
+    root = _console_web_root()
+    if root is not None:
+        app.mount(
+            "/console",
+            StaticFiles(directory=str(root), html=True),
+            name="console",
+        )
+    else:
+        logger.warning("console assets not found; /console not mounted")
 
     return app

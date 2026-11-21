@@ -127,6 +127,33 @@ curl http://127.0.0.1:8080/runs/<run_id>/events # full per-run event list
 Caddy surface. Reach it on the listener port directly (host run), or via an
 SSH tunnel / tailnet serve.
 
+### Ops console (`/console`)
+
+The receiver mounts the ops console (`site/web`) at `http://127.0.0.1:8080/console`
+— listener-local with the same posture as `/`, `/runs` and `/events` (no
+auth). It shows the data behind those endpoints instead of the synthetic
+fixtures, and deep-links a selected run through `#run=<run_id>`:
+
+| Console surface | Service mode (`/console`) | Fixture mode (`?fixtures=1`) |
+|---|---|---|
+| Runs rail | `GET /runs`, newest first | `site/web/data.mjs` fixtures |
+| Per-run trace | `GET /runs/<run_id>/events`, fetched when a run is selected | events embedded in the fixture |
+| Webhook tail | `GET /events/history` | fixture tail |
+| Analyst chat | offline by design — the receiver does not serve the chat Function | local demo Function on the dev server |
+
+The rail refresh button re-fetches the run index and the tail. A failed load
+reports "service unreachable" with a retry; the console never falls back to
+fixtures silently, because that would present an outage as data.
+
+For the demo without a running service:
+
+```sh
+node site/dev/server.mjs   # http://127.0.0.1:4173, redirects to /?fixtures=1
+```
+
+Opening `site/web/index.html` over `file://` cannot work: the console loads as
+ES modules, which browsers block for `file://` origins.
+
 ## 7. Troubleshoot
 
 | Symptom | Meaning / fix |

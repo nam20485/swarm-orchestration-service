@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; base-uri 'none'; form-action 'self'">
+<meta name="color-scheme" content="dark light">
+<meta name="description" content="A run console for the swarm-orchestration-service: webhook ingest, queue lifecycle, ACP sessions and sandbox events, with an analyst that explains the trace.">
+<title>Swarm Ops Console</title>
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<a class="skip-link" href="#run-view">Skip to run detail</a>
+
+<header class="topbar">
+  <div class="brand">
+    <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+      <path d="M16 7 6 14v10l10 7 10-7V14Z" fill="none" stroke="currentColor" stroke-width="1.4" opacity=".35"/>
+      <circle cx="16" cy="7" r="3" fill="currentColor"/>
+      <circle cx="6" cy="24" r="3" fill="currentColor" opacity=".7"/>
+      <circle cx="26" cy="24" r="3" fill="currentColor" opacity=".7"/>
+      <path d="M16 10v6m0 0-7 6m7-6 7 6" stroke="currentColor" stroke-width="1.2" fill="none" opacity=".65"/>
+    </svg>
+    <div class="brand-text">
+      <span class="brand-name">swarm<span class="brand-slash">/</span>orchestration</span>
+      <span class="brand-sub">ops console</span>
+    </div>
+  </div>
+  <div class="topbar-meta">
+    <span class="chip ghost" title="Every run and event shown here is a synthetic fixture. The assistant is the only live integration.">
+      <span class="dot amber"></span>sample fixtures
+    </span>
+    <span class="chip ghost mono">v0.2.0</span>
+    <button class="icon-btn" id="theme-toggle" type="button" aria-label="Switch color theme" title="Switch color theme">
+      <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4m0-14.2-1.4 1.4M6.3 17.7l-1.4 1.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+    </button>
+  </div>
+</header>
+
+<main class="console">
+  <aside class="rail" aria-label="Runs">
+    <div class="rail-head">
+      <h2>Runs <span class="count" id="run-count">0</span></h2>
+      <p>newest first · GET /runs</p>
+    </div>
+    <div class="rail-tools">
+      <label class="search">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="m16 16 4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <span class="sr-only">Filter runs</span>
+        <input id="run-search" type="search" placeholder="filter by id, title, label…" autocomplete="off" spellcheck="false">
+      </label>
+      <div class="filters" role="group" aria-label="Filter runs by outcome">
+        <button type="button" data-filter="all" class="active">all <span>0</span></button>
+        <button type="button" data-filter="running">running <span>0</span></button>
+        <button type="button" data-filter="failed">failed <span>0</span></button>
+        <button type="button" data-filter="done">done <span>0</span></button>
+      </div>
+    </div>
+    <div id="run-list" class="run-list"></div>
+    <p class="rail-empty" id="run-empty" hidden>No runs match this filter.</p>
+    <div class="rail-foot">
+      <span class="dot ok"></span>
+      manifests + events.jsonl merged
+    </div>
+  </aside>
+
+  <section class="stage" aria-label="Run detail">
+    <div id="run-view"></div>
+
+    <section class="tail" aria-label="Durable webhook tail">
+      <div class="section-head">
+        <div>
+          <h2>Durable webhook tail</h2>
+          <p>root events.jsonl · rotated · survives restarts</p>
+        </div>
+        <span class="chip ghost">fixtures</span>
+      </div>
+      <div class="tail-wrap">
+        <table class="tail-table">
+          <thead>
+            <tr><th>time</th><th>event</th><th>delivery</th><th>detail</th></tr>
+          </thead>
+          <tbody id="tail-body"></tbody>
+        </table>
+      </div>
+      <p class="tail-note">Filtered and duplicate deliveries never reach the queue. They are visible here because the durable log is written before the transport gate decides.</p>
+    </section>
+  </section>
+
+  <aside class="analyst" aria-label="Run analyst">
+    <header class="analyst-head">
+      <div class="analyst-title">
+        <span class="spark" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M12 3v4m0 10v4M3 12h4m10 0h4M5.6 5.6l2.8 2.8m7.2 7.2 2.8 2.8m0-12.8-2.8 2.8M8.4 15.6l-2.8 2.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="12" cy="12" r="3.4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+        </span>
+        <div>
+          <h2>Run analyst</h2>
+          <p>grounded in the trace contract</p>
+        </div>
+      </div>
+      <span class="chip mode" id="chat-mode" title="Assistant connection state">connecting</span>
+    </header>
+
+    <div class="context-bar" id="chat-context"></div>
+    <div class="notice" id="chat-notice" role="status" aria-live="polite" hidden></div>
+
+    <div class="chat-scroll" id="chat-scroll">
+      <div class="chat-empty" id="chat-empty">
+        <h3>Ask about a run</h3>
+        <p>The analyst reads the selected run's event trace and explains gate decisions, queue timing, sandbox lifecycle and ACP outcomes.</p>
+        <div class="suggestions" id="chat-suggestions"></div>
+        <p class="chat-empty-note">One conversation per tab session. Reloading restores it; closing the tab ends it.</p>
+      </div>
+      <div class="chat-messages" id="chat-messages"></div>
+    </div>
+
+    <form class="composer" id="chat-form">
+      <label class="sr-only" for="chat-input">Message the run analyst</label>
+      <textarea id="chat-input" rows="2" maxlength="4000" placeholder="Ask about this run…" spellcheck="false"></textarea>
+      <div class="composer-foot">
+        <span class="hint" id="chat-hint">Enter to send · Shift+Enter newline</span>
+        <span class="sr-only" id="chat-activity" aria-live="polite"></span>
+        <div class="composer-btns">
+          <button type="button" class="stop" id="chat-stop" hidden>stop</button>
+          <button type="submit" class="send" id="chat-send" disabled>send</button>
+        </div>
+      </div>
+    </form>
+    <footer class="analyst-foot">
+      <span id="chat-persistence">Ephemeral session — no history is stored.</span>
+      <span class="analyst-foot-note">Model and tools are fixed server-side.</span>
+    </footer>
+  </aside>
+</main>
+
+<noscript>
+  <p class="noscript">This console renders run traces with JavaScript. Enable it to browse the fixtures.</p>
+</noscript>
+<script type="module" src="./app.mjs"></script>
+</body>
+</html>

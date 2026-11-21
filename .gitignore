@@ -80,6 +80,7 @@ TestResults/
 # swarm telemetry run artifact (created/appended by swarm-analyst; never committed)
 docs/swarm-metrics.md
 
-# local-only tool state and in-progress site work (never committed)
+# Local-only tool state. site/ is tracked — the receiver serves it at /console —
+# except the Qoder draft manifest, which carries account-scoped ids.
 .pair/
-site/
+site/.*.qoder.site
